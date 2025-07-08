@@ -7,7 +7,7 @@ plt.rcParams["axes.unicode_minus"] = False
 
 def prepare():
     # 读取 Excel（或 CSV）
-    df = pd.read_excel(r"e:\项目\库存\库存信息-更新至0701.xlsx", sheet_name="库存信息")
+    df = pd.read_excel(r"库存信息-更新至0701.xlsx", sheet_name="库存信息")
     # 数据清洗
     # 移除无关列（包括“日期”列）
 
