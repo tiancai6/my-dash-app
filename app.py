@@ -1,5 +1,4 @@
-import dash
-from dash import dcc, html, Input, Output, callback
+from dash import Dash, dcc, html, Input, Output, callback
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
@@ -44,7 +43,7 @@ def create_integrated_dash_app(df):
     local_options = [{'label': '全部', 'value': '全部'}] + [{'label': local, 'value': local} for local in sorted(df['local'].unique())]
     
     # 创建Dash应用
-    app = dash.Dash(__name__)
+    app = Dash(__name__)
     
     # 定义应用布局
     app.layout = html.Div([
@@ -520,10 +519,10 @@ def create_integrated_dash_app(df):
                         'seller': seller[:10] + '...' if len(str(seller)) > 10 else str(seller)
                     })
                 elif len(seller_df) == 1:
-                    first_price_row = seller_df.iloc[0]
+                    second_price_row = seller_df.iloc[0]
                     second_prices.append({
-                        'price': first_price_row['price'],
-                        'storage': first_price_row['storage'],
+                        'price': second_price_row['price'],
+                        'storage': second_price_row['storage'],
                         'seller': seller[:10] + '...' if len(str(seller)) > 10 else str(seller)
                     })
             
@@ -594,28 +593,14 @@ def create_integrated_dash_app(df):
     
     return app
 
-# 在文件末尾添加以下代码
+# 模块级别定义 app 和 server
+processed_df = prepare()  # 确保 prepare() 返回有效 DataFrame
+app = create_integrated_dash_app(processed_df)
+server = app.server if app is not None else None  # 暴露 server 给 Gunicorn
+
 if __name__ == '__main__':
-    import os
-    
-    # 准备数据
-    try:
-        df = prepare()
-        if df is not None and not df.empty:
-            app = create_integrated_dash_app(df)
-            if app is not None:
-                # 获取端口号，Render会提供PORT环境变量
-                port = int(os.environ.get('PORT', 8050))
-                
-                # 启动应用，适配Render部署
-                app.run(
-                    host='0.0.0.0',  # 允许外部访问
-                    port=port,        # 使用环境变量端口
-                    debug=False       # 生产环境关闭调试模式
-                )
-            else:
-                print("应用创建失败，请检查数据")
-        else:
-            print("数据准备失败或数据为空")
-    except Exception as e:
-        print(f"应用启动失败: {str(e)}")
+    if app is not None:
+        app.run(debug=True, host='127.0.0.1', port=8050)
+        print("\n集成应用已启动！请在浏览器中访问: http://127.0.0.1:8050")
+    else:
+        print("应用创建失败，请检查数据")
