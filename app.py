@@ -179,28 +179,81 @@ def create_integrated_dash_app(df):
     
     def create_price_analysis_chart(filtered_df):
         """创建价格K线分析图表"""
-        # 按日期分组，计算每天的K线数据
+        # 数据预处理
+        df_copy = filtered_df.copy()
+        df_copy['price'] = pd.to_numeric(df_copy['price'], errors='coerce')
+        df_copy['date'] = pd.to_datetime(df_copy['date'], errors='coerce')
+        df_copy = df_copy.dropna(subset=['date', 'price'])
+        
+        # 按日期分组，计算每天的K线数据（修改为按颜色分组）
         daily_stats = []
         
-        for date in sorted(filtered_df['date'].unique()):
-            date_df = filtered_df[filtered_df['date'] == date]
+        for date in sorted(df_copy['date'].dt.date.unique()):
+            date_data = df_copy[df_copy['date'].dt.date == date].copy()
             
-            if not date_df.empty:
-                # 按时间排序
-                date_df = date_df.sort_values('date_add_to_bag')
+            if len(date_data) == 0:
+                continue
+            
+            # 检查是否有颜色列
+            if 'color' not in date_data.columns:
+                # 如果没有颜色列，使用原来的逻辑
+                date_data = date_data.sort_values('date_add_to_bag')
+                prices = date_data['price'].dropna()
                 
-                # K线数据：开盘价（第一个价格）、收盘价（最后一个价格）、最高价、最低价
-                open_price = date_df.iloc[0]['price']
-                close_price = date_df.iloc[-1]['price']
-                high_price = date_df['price'].max()
-                low_price = date_df['price'].min()
+                if len(prices) == 0:
+                    continue
+                elif len(prices) == 1:
+                    price = prices.iloc[0]
+                    daily_stats.append({
+                        'date': pd.to_datetime(date),
+                        'open': price,
+                        'close': price,
+                        'high': price,
+                        'low': price
+                    })
+                else:
+                    first_half = prices[:len(prices)//2]
+                    second_half = prices[len(prices)//2:]
+                    
+                    first_median = first_half.median()
+                    second_median = second_half.median()
+                    
+                    daily_stats.append({
+                        'date': pd.to_datetime(date),
+                        'open': first_median,
+                        'close': second_median,
+                        'high': prices.max(),
+                        'low': prices.min()
+                    })
+            else:
+                # 按颜色分组，取每种颜色的第一次和最后一次价格
+                color_groups = date_data.groupby('color')
+                first_prices = []  # 存储每种颜色第一次出现的价格
+                last_prices = []   # 存储每种颜色最后一次出现的价格
+                all_prices = []    # 存储所有价格用于计算最高最低价
+                
+                for color, group in color_groups:
+                    group_sorted = group.sort_values('date_add_to_bag')
+                    group_prices = group_sorted['price'].dropna()
+                    
+                    if len(group_prices) > 0:
+                        first_prices.append(group_prices.iloc[0])  # 第一次出现
+                        last_prices.append(group_prices.iloc[-1])  # 最后一次出现
+                        all_prices.extend(group_prices.tolist())
+                
+                if len(first_prices) == 0 or len(last_prices) == 0:
+                    continue
+                
+                # 计算中位数
+                first_median = pd.Series(first_prices).median()  # 所有颜色第一次价格的中位数
+                last_median = pd.Series(last_prices).median()    # 所有颜色最后一次价格的中位数
                 
                 daily_stats.append({
-                    'date': date,
-                    'open': open_price,
-                    'close': close_price,
-                    'high': high_price,
-                    'low': low_price
+                    'date': pd.to_datetime(date),
+                    'open': first_median,
+                    'close': last_median,
+                    'high': max(all_prices) if all_prices else first_median,
+                    'low': min(all_prices) if all_prices else first_median
                 })
         
         if not daily_stats:
@@ -325,50 +378,46 @@ def create_integrated_dash_app(df):
                 )
                 return fig
             
-            # ===== K线图数据处理（与Jupyter版本完全一致）=====
-            daily_price_data = []
+            # ===== K线图数据处理（修改为按颜色分组）===== 
+            daily_price_data = [] 
             
-            for date in sorted(df_copy['date'].dt.date.unique()):
-                date_data = df_copy[df_copy['date'].dt.date == date].copy()
+            for date in sorted(df_copy['date'].dt.date.unique()): 
+                date_data = df_copy[df_copy['date'].dt.date == date].copy() 
                 
-                if len(date_data) == 0:
-                    continue
+                if len(date_data) == 0: 
+                    continue 
                 
-                # 按时间排序
-                date_data = date_data.sort_values('date_add_to_bag')
-                prices = date_data['price'].dropna()
+                # 按颜色分组，取每种颜色的第一次和最后一次价格 
+                color_groups = date_data.groupby('color') 
+                first_prices = []  # 存储每种颜色第一次出现的价格 
+                last_prices = []   # 存储每种颜色最后一次出现的价格 
+                all_prices = []    # 存储所有价格用于计算最高最低价 
                 
-                if len(prices) == 0:
-                    continue
-                elif len(prices) == 1:
-                    # 只有一个价格数据点
-                    price = prices.iloc[0]
-                    daily_price_data.append({
-                        'date': pd.to_datetime(date),
-                        'first_median': price,
-                        'second_median': price,
-                        'open': price,
-                        'close': price,
-                        'high': price,
-                        'low': price
-                    })
-                else:
-                    # 计算第一次和第二次中位数
-                    first_half = prices[:len(prices)//2] if len(prices) > 1 else prices
-                    second_half = prices[len(prices)//2:] if len(prices) > 1 else prices
+                for color, group in color_groups: 
+                    group_sorted = group.sort_values('date_add_to_bag') 
+                    group_prices = group_sorted['price'].dropna() 
                     
-                    first_median = first_half.median()
-                    second_median = second_half.median()
-                    
-                    daily_price_data.append({
-                        'date': pd.to_datetime(date),
-                        'first_median': first_median,
-                        'second_median': second_median,
-                        'open': first_median,
-                        'close': second_median,
-                        'high': prices.max(),
-                        'low': prices.min()
-                    })
+                    if len(group_prices) > 0: 
+                        first_prices.append(group_prices.iloc[0])  # 第一次出现 
+                        last_prices.append(group_prices.iloc[-1])  # 最后一次出现 
+                        all_prices.extend(group_prices.tolist()) 
+                
+                if len(first_prices) == 0 or len(last_prices) == 0: 
+                    continue 
+                
+                # 计算中位数 
+                first_median = pd.Series(first_prices).median()  # 所有颜色第一次价格的中位数 
+                second_median = pd.Series(last_prices).median()  # 所有颜色最后一次价格的中位数 
+                
+                daily_price_data.append({ 
+                    'date': pd.to_datetime(date), 
+                    'first_median': first_median, 
+                    'second_median': second_median, 
+                    'open': first_median, 
+                    'close': second_median, 
+                    'high': max(all_prices) if all_prices else first_median, 
+                    'low': min(all_prices) if all_prices else first_median 
+                }) 
             
             daily_df = pd.DataFrame(daily_price_data)
             
