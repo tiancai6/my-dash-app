@@ -594,17 +594,28 @@ def create_integrated_dash_app(df):
     
     return app
 
-# 使用示例
+# 在文件末尾添加以下代码
 if __name__ == '__main__':
-    # 假设您的数据已经加载为processed_df
-    # 请确保processed_df变量在此处可用
-    processed_df = prepare()
-    # 创建集成应用
-    app = create_integrated_dash_app(processed_df)
+    import os
     
-    if app is not None:
-        # 运行应用
-        app.run(debug=True, host='127.0.0.1', port=8050)
-        print("\n集成应用已启动！请在浏览器中访问: http://127.0.0.1:8050")
-    else:
-        print("应用创建失败，请检查数据")
+    # 准备数据
+    try:
+        df = prepare()
+        if df is not None and not df.empty:
+            app = create_integrated_dash_app(df)
+            if app is not None:
+                # 获取端口号，Render会提供PORT环境变量
+                port = int(os.environ.get('PORT', 8050))
+                
+                # 启动应用，适配Render部署
+                app.run_server(
+                    host='0.0.0.0',  # 允许外部访问
+                    port=port,        # 使用环境变量端口
+                    debug=False       # 生产环境关闭调试模式
+                )
+            else:
+                print("应用创建失败，请检查数据")
+        else:
+            print("数据准备失败或数据为空")
+    except Exception as e:
+        print(f"应用启动失败: {str(e)}")
