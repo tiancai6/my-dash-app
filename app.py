@@ -1,10 +1,12 @@
-from dash import Dash, dcc, html, Input, Output, callback
+import dash
+from dash import dcc, html, Input, Output
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
 import plotly.express as px
 from prepare import prepare
+import os
 
 def create_integrated_dash_app(df):
     """
@@ -43,7 +45,7 @@ def create_integrated_dash_app(df):
     local_options = [{'label': '全部', 'value': '全部'}] + [{'label': local, 'value': local} for local in sorted(df['local'].unique())]
     
     # 创建Dash应用
-    app = Dash(__name__)
+    app = dash.Dash(__name__)
     
     # 定义应用布局
     app.layout = html.Div([
@@ -176,32 +178,32 @@ def create_integrated_dash_app(df):
             return dcc.Graph(figure=fig, style={'height': '1500px'})
     
     def create_price_analysis_chart(filtered_df):
-        """创建价格K线分析图表（原create_interactive_price_chart逻辑）"""
-        # 按日期和颜色分组，计算每天每种颜色的第一次和第二次价格
-        daily_color_stats = []
+        """创建价格K线分析图表"""
+        # 按日期分组，计算每天的K线数据
+        daily_stats = []
         
         for date in sorted(filtered_df['date'].unique()):
             date_df = filtered_df[filtered_df['date'] == date]
             
-            for color in date_df['color'].unique():
-                color_df = date_df[date_df['color'] == color].sort_values('date_add_to_bag')
+            if not date_df.empty:
+                # 按时间排序
+                date_df = date_df.sort_values('date_add_to_bag')
                 
-                if len(color_df) >= 2:
-                    first_price = color_df.iloc[0]['price']
-                    second_price = color_df.iloc[1]['price']
-                elif len(color_df) == 1:
-                    first_price = second_price = color_df.iloc[0]['price']
-                else:
-                    continue
+                # K线数据：开盘价（第一个价格）、收盘价（最后一个价格）、最高价、最低价
+                open_price = date_df.iloc[0]['price']
+                close_price = date_df.iloc[-1]['price']
+                high_price = date_df['price'].max()
+                low_price = date_df['price'].min()
                 
-                daily_color_stats.append({
+                daily_stats.append({
                     'date': date,
-                    'color': color,
-                    'first_price': first_price,
-                    'second_price': second_price
+                    'open': open_price,
+                    'close': close_price,
+                    'high': high_price,
+                    'low': low_price
                 })
         
-        if not daily_color_stats:
+        if not daily_stats:
             fig = go.Figure()
             fig.add_annotation(
                 text="没有足够的数据生成图表",
@@ -211,45 +213,18 @@ def create_integrated_dash_app(df):
             )
             return fig
         
-        color_stats_df = pd.DataFrame(daily_color_stats)
-        
-        # 按日期分组，计算每天的开盘价、收盘价、最高价、最低价
-        daily_stats = []
-        
-        for date in sorted(color_stats_df['date'].unique()):
-            date_data = color_stats_df[color_stats_df['date'] == date]
-            
-            # 计算第一次和第二次的中位数
-            first_median = date_data['first_price'].median()
-            second_median = date_data['second_price'].median()
-            
-            # 所有价格的最高和最低
-            all_prices = list(date_data['first_price']) + list(date_data['second_price'])
-            high_price = max(all_prices)
-            low_price = min(all_prices)
-            
-            daily_stats.append({
-                'date': date,
-                'open': first_median,
-                'close': second_median,
-                'high': high_price,
-                'low': low_price,
-                'first_median': first_median,
-                'second_median': second_median
-            })
-        
         daily_df = pd.DataFrame(daily_stats)
         daily_df = daily_df.sort_values('date')
         
-        # 处理Storage库存数据
-        first_storage_data, second_storage_data = process_storage_data(filtered_df)
+        # 计算库存数据
+        first_inventory_data, last_inventory_data = calculate_inventory_data(filtered_df)
         
         # 创建三子图布局
         fig = make_subplots(
             rows=3, cols=1,
             shared_xaxes=False,
             vertical_spacing=0.15,
-            subplot_titles=('价格K线图', '第一次中位数Storage库存', '第二次中位数Storage库存'),
+            subplot_titles=('价格K线图', '每天第一次库存数量', '每天最后一次库存数量'),
             row_heights=[0.4, 0.3, 0.3]
         )
         
@@ -261,20 +236,19 @@ def create_integrated_dash_app(df):
                 high=daily_df['high'],
                 low=daily_df['low'],
                 close=daily_df['close'],
-                name='价格',
-                text=[f"日期: {date}<br>第一次中位数: {first:.2f}€<br>第二次中位数: {second:.2f}€<br>最高价: {high:.2f}€<br>最低价: {low:.2f}€" 
-                      if not pd.isna(first) else f"日期: {date}<br>无数据"
-                      for date, first, second, high, low in zip(
-                          daily_df['date'], daily_df['first_median'], 
-                          daily_df['second_median'], daily_df['high'], daily_df['low']
+                name='价格K线',
+                text=[f"日期: {date}<br>开盘: {open_p:.2f}€<br>收盘: {close_p:.2f}€<br>最高: {high_p:.2f}€<br>最低: {low_p:.2f}€" 
+                      for date, open_p, close_p, high_p, low_p in zip(
+                          daily_df['date'], daily_df['open'], 
+                          daily_df['close'], daily_df['high'], daily_df['low']
                       )],
                 hoverinfo='text'
             ),
             row=1, col=1
         )
         
-        # 添加Storage库存图表
-        add_storage_charts(fig, first_storage_data, second_storage_data)
+        # 添加库存图表
+        add_inventory_charts(fig, first_inventory_data, last_inventory_data)
         
         # 更新布局
         fig.update_layout(
@@ -290,16 +264,343 @@ def create_integrated_dash_app(df):
         fig.update_xaxes(row=3, col=1, tickangle=45)
         
         fig.update_yaxes(title_text="价格 (€)", row=1, col=1)
-        fig.update_yaxes(title_text="中位数库存", row=2, col=1)
-        fig.update_yaxes(title_text="中位数库存", row=3, col=1)
+        fig.update_yaxes(title_text="库存数量", row=2, col=1)
+        fig.update_yaxes(title_text="库存数量", row=3, col=1)
         
         return fig
     
     def create_daily_color_analysis_chart(filtered_df):
-        """创建每日颜色库存分析图表（原create_interactive_daily_color_chart逻辑）"""
-        # 计算每天每个颜色的第一次和最后一次库存
-        daily_color_inventory = []
-        daily_total_inventory = []
+        """创建每日颜色库存分析图表"""
+        try:
+            # 检查必需的列是否存在
+            required_columns = ['model', 'grade_name', 'battery', 'storage', 'sim_type', 'local', 'color', 'date', 'date_add_to_bag']
+            missing_columns = [col for col in required_columns if col not in filtered_df.columns]
+            
+            if missing_columns:
+                fig = go.Figure()
+                fig.add_annotation(
+                    text=f"数据缺少必需的列: {', '.join(missing_columns)}",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                    showarrow=False, font=dict(size=20)
+                )
+                return fig
+            
+            # 检查数据是否为空
+            if filtered_df.empty:
+                fig = go.Figure()
+                fig.add_annotation(
+                    text="筛选后数据为空",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                    showarrow=False, font=dict(size=20)
+                )
+                return fig
+            
+            # 数据预处理
+            df_copy = filtered_df.copy()
+            
+            # 确保筛选列的数据类型正确
+            filter_columns = ['model', 'grade_name', 'battery', 'storage', 'sim_type', 'local']
+            for col in filter_columns:
+                if col in df_copy.columns:
+                    df_copy[col] = df_copy[col].astype(str)
+            
+            # 确保价格列是数值类型
+            df_copy['price'] = pd.to_numeric(df_copy['price'], errors='coerce')
+            
+            # 处理日期列
+            df_copy['date'] = pd.to_datetime(df_copy['date'], errors='coerce')
+            
+            # 移除NaN值
+            df_copy = df_copy.dropna(subset=['date', 'price'])
+            
+            if df_copy.empty:
+                fig = go.Figure()
+                fig.add_annotation(
+                    text="处理后数据为空",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                    showarrow=False, font=dict(size=20)
+                )
+                return fig
+            
+            # ===== K线图数据处理（与Jupyter版本完全一致）=====
+            daily_price_data = []
+            
+            for date in sorted(df_copy['date'].dt.date.unique()):
+                date_data = df_copy[df_copy['date'].dt.date == date].copy()
+                
+                if len(date_data) == 0:
+                    continue
+                
+                # 按时间排序
+                date_data = date_data.sort_values('date_add_to_bag')
+                prices = date_data['price'].dropna()
+                
+                if len(prices) == 0:
+                    continue
+                elif len(prices) == 1:
+                    # 只有一个价格数据点
+                    price = prices.iloc[0]
+                    daily_price_data.append({
+                        'date': pd.to_datetime(date),
+                        'first_median': price,
+                        'second_median': price,
+                        'open': price,
+                        'close': price,
+                        'high': price,
+                        'low': price
+                    })
+                else:
+                    # 计算第一次和第二次中位数
+                    first_half = prices[:len(prices)//2] if len(prices) > 1 else prices
+                    second_half = prices[len(prices)//2:] if len(prices) > 1 else prices
+                    
+                    first_median = first_half.median()
+                    second_median = second_half.median()
+                    
+                    daily_price_data.append({
+                        'date': pd.to_datetime(date),
+                        'first_median': first_median,
+                        'second_median': second_median,
+                        'open': first_median,
+                        'close': second_median,
+                        'high': prices.max(),
+                        'low': prices.min()
+                    })
+            
+            daily_df = pd.DataFrame(daily_price_data)
+            
+            # ===== 库存数据处理（与Jupyter版本完全一致）=====
+            # 创建unique_key
+            df_copy['unique_key'] = (
+                df_copy['model'].astype(str) + '_' +
+                df_copy['grade_name'].astype(str) + '_' +
+                df_copy['battery'].astype(str) + '_' +
+                df_copy['storage'].astype(str) + '_' +
+                df_copy['sim_type'].astype(str) + '_' +
+                df_copy['local'].astype(str) + '_' +
+                df_copy['color'].astype(str)
+            )
+            
+            # 按日期分组处理库存数据
+            daily_color_inventory = []
+            daily_total_inventory = []
+            
+            for date in sorted(df_copy['date'].dt.date.unique()):
+                date_data = df_copy[df_copy['date'].dt.date == date].copy()
+                
+                if len(date_data) == 0:
+                    continue
+                
+                # 按unique_key分组
+                grouped = date_data.groupby('unique_key')
+                
+                daily_first_color = {}
+                daily_last_color = {}
+                daily_first_total = 0
+                daily_last_total = 0
+                
+                for unique_key, group in grouped:
+                    group = group.sort_values('date_add_to_bag')
+                    color = group['color'].iloc[0]
+                    
+                    # 使用quantity列或记录数
+                    if 'quantity' in group.columns:
+                        first_inventory = pd.to_numeric(group['quantity'].iloc[0], errors='coerce')
+                        last_inventory = pd.to_numeric(group['quantity'].iloc[-1], errors='coerce')
+                        
+                        if pd.isna(first_inventory):
+                            first_inventory = 1
+                        if pd.isna(last_inventory):
+                            last_inventory = len(group)
+                    else:
+                        first_inventory = 1
+                        last_inventory = len(group)
+                    
+                    # 累加颜色库存
+                    daily_first_color[color] = daily_first_color.get(color, 0) + first_inventory
+                    daily_last_color[color] = daily_last_color.get(color, 0) + last_inventory
+                    
+                    # 累加总库存
+                    daily_first_total += first_inventory
+                    daily_last_total += last_inventory
+                
+                # 记录每个颜色的库存
+                for color in set(list(daily_first_color.keys()) + list(daily_last_color.keys())):
+                    daily_color_inventory.append({
+                        'date': pd.to_datetime(date),
+                        'color': color,
+                        'first_inventory': daily_first_color.get(color, 0),
+                        'last_inventory': daily_last_color.get(color, 0)
+                    })
+                
+                # 记录总库存
+                daily_total_inventory.append({
+                    'date': pd.to_datetime(date),
+                    'first_total': daily_first_total,
+                    'last_total': daily_last_total
+                })
+            
+            # 转换为DataFrame
+            color_inventory_df = pd.DataFrame(daily_color_inventory)
+            total_inventory_df = pd.DataFrame(daily_total_inventory)
+            
+            # 分离第一次和最后一次数据
+            if not color_inventory_df.empty:
+                first_color_df = color_inventory_df[['date', 'color', 'first_inventory']].rename(columns={'first_inventory': 'inventory'})
+                last_color_df = color_inventory_df[['date', 'color', 'last_inventory']].rename(columns={'last_inventory': 'inventory'})
+            else:
+                first_color_df = pd.DataFrame()
+                last_color_df = pd.DataFrame()
+            
+            if not total_inventory_df.empty:
+                first_total_df = total_inventory_df[['date', 'first_total']].rename(columns={'first_total': 'total_inventory'})
+                last_total_df = total_inventory_df[['date', 'last_total']].rename(columns={'last_total': 'total_inventory'})
+            else:
+                first_total_df = pd.DataFrame()
+                last_total_df = pd.DataFrame()
+            
+            # ===== 创建五子图布局 =====
+            fig = make_subplots(
+                rows=5, cols=1,
+                shared_xaxes=False,
+                vertical_spacing=0.08,
+                subplot_titles=('价格K线图',
+                               '每天每个颜色的库存数量（第一次出现）',
+                               '每天每个颜色的库存数量（最后一次出现）',
+                               '每天第一次出现的总库存（不区分颜色）',
+                               '每天最后一次出现的总库存（不区分颜色）'),
+                row_heights=[0.25, 0.2, 0.2, 0.175, 0.175]
+            )
+            
+            # ===== 第一图：K线图（与create_interactive_price_chart完全一样） =====
+            if not daily_df.empty:
+                fig.add_trace(
+                    go.Candlestick(
+                        x=daily_df['date'],
+                        open=daily_df['open'],
+                        high=daily_df['high'],
+                        low=daily_df['low'],
+                        close=daily_df['close'],
+                        name='价格',
+                        text=[f"日期: {date}<br>第一次中位数: {first:.2f}€<br>第二次中位数: {second:.2f}€<br>最高价: {high:.2f}€<br>最低价: {low:.2f}€"
+                              if not pd.isna(first) else f"日期: {date}<br>无数据"
+                              for date, first, second, high, low in zip(
+                                  daily_df['date'], daily_df['first_median'],
+                                  daily_df['second_median'], daily_df['high'], daily_df['low']
+                              )],
+                        hoverinfo='text'
+                    ),
+                    row=1, col=1
+                )
+            
+            # ===== 第二图：每天每个颜色的库存数量（第一次出现）- 同一天的颜色靠在一起 =====
+            if not first_color_df.empty:
+                # 为不同颜色分配颜色
+                colors_list = sorted(first_color_df['color'].unique())
+                colors_map = px.colors.qualitative.Set3[:len(colors_list)]
+                if len(colors_list) > len(colors_map):
+                    colors_map = colors_map * (len(colors_list) // len(colors_map) + 1)
+                color_mapping = dict(zip(colors_list, colors_map))
+                
+                # 重新组织数据，让同一天的颜色靠在一起
+                for color in colors_list:
+                    color_data = first_color_df[first_color_df['color'] == color]
+                    if not color_data.empty:
+                        fig.add_trace(
+                            go.Bar(
+                                x=color_data['date'],  # 直接使用日期作为x轴
+                                y=color_data['inventory'],
+                                name=f'第一次-{color}',
+                                marker_color=color_mapping[color],
+                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<extra></extra>',
+                                offsetgroup=color,  # 使用offsetgroup让同一天的不同颜色靠在一起
+                                legendgroup=f'first_{color}'
+                            ),
+                            row=2, col=1
+                        )
+            
+            # ===== 第三图：每天每个颜色的库存数量（最后一次出现）- 同一天的颜色靠在一起 =====
+            if not last_color_df.empty:
+                # 为不同颜色分配颜色
+                colors_list = sorted(last_color_df['color'].unique())
+                colors_map = px.colors.qualitative.Set3[:len(colors_list)]
+                if len(colors_list) > len(colors_map):
+                    colors_map = colors_map * (len(colors_list) // len(colors_map) + 1)
+                color_mapping = dict(zip(colors_list, colors_map))
+                
+                # 重新组织数据，让同一天的颜色靠在一起
+                for color in colors_list:
+                    color_data = last_color_df[last_color_df['color'] == color]
+                    if not color_data.empty:
+                        fig.add_trace(
+                            go.Bar(
+                                x=color_data['date'],  # 直接使用日期作为x轴
+                                y=color_data['inventory'],
+                                name=f'最后一次-{color}',
+                                marker_color=color_mapping[color],
+                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<extra></extra>',
+                                offsetgroup=color,  # 使用offsetgroup让同一天的不同颜色靠在一起
+                                legendgroup=f'last_{color}'
+                            ),
+                            row=3, col=1
+                        )
+            
+            # ===== 第四图：每天第一次出现的总库存 =====
+            if not first_total_df.empty:
+                fig.add_trace(
+                    go.Bar(
+                        x=first_total_df['date'],
+                        y=first_total_df['total_inventory'],
+                        name='第一次总库存',
+                        marker_color='skyblue',
+                        hovertemplate='日期: %{x}<br>总库存数量: %{y}<extra></extra>'
+                    ),
+                    row=4, col=1
+                )
+            
+            # ===== 第五图：每天最后一次出现的总库存 =====
+            if not last_total_df.empty:
+                fig.add_trace(
+                    go.Bar(
+                        x=last_total_df['date'],
+                        y=last_total_df['total_inventory'],
+                        name='最后一次总库存',
+                        marker_color='lightcoral',
+                        hovertemplate='日期: %{x}<br>总库存数量: %{y}<extra></extra>'
+                    ),
+                    row=5, col=1
+                )
+            
+            # ===== 更新布局 =====
+            fig.update_layout(
+                title=f'交互式价格和库存分析图表（五子图版本）',
+                height=1600,
+                width=1400,
+                showlegend=True,  # 显示图例以区分不同颜色
+                xaxis_rangeslider_visible=False,
+                barmode='group'  # 设置柱状图为分组模式，让同一天的不同颜色靠在一起
+            )
+            
+            return fig
+            
+        except Exception as e:
+            print(f"创建图表时出错: {str(e)}")
+            fig = go.Figure()
+            fig.add_annotation(
+                text=f"数据处理错误: {str(e)}",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                showarrow=False, font=dict(size=16)
+            )
+            return fig
+    
+    def calculate_inventory_data(filtered_df):
+        """计算库存数据"""
+        first_inventory_data = []
+        last_inventory_data = []
         
         for date in sorted(filtered_df['date'].unique()):
             date_df = filtered_df[filtered_df['date'] == date]
@@ -310,286 +611,63 @@ def create_integrated_dash_app(df):
             
             first_total = 0
             last_total = 0
-            color_first_counts = {}
-            color_last_counts = {}
             
             for group_key, group_data in grouped:
                 group_data = group_data.sort_values('date_add_to_bag')
-                color = group_key[-1]  # 颜色是最后一个键
                 
                 # 第一次出现的库存
                 first_inventory = group_data.iloc[0].get('storage_count', group_data.iloc[0].get('quantity', 1))
                 # 最后一次出现的库存
                 last_inventory = group_data.iloc[-1].get('storage_count', group_data.iloc[-1].get('quantity', 1))
                 
-                # 累加到颜色统计
-                color_first_counts[color] = color_first_counts.get(color, 0) + first_inventory
-                color_last_counts[color] = color_last_counts.get(color, 0) + last_inventory
-                
-                # 累加到总计
                 first_total += first_inventory
                 last_total += last_inventory
             
-            # 记录每个颜色的库存
-            for color in set(list(color_first_counts.keys()) + list(color_last_counts.keys())):
-                daily_color_inventory.append({
-                    'date': date,
-                    'color': color,
-                    'first_inventory': color_first_counts.get(color, 0),
-                    'last_inventory': color_last_counts.get(color, 0)
-                })
-            
-            # 记录总库存
-            daily_total_inventory.append({
+            first_inventory_data.append({
                 'date': date,
-                'first_total': first_total,
-                'last_total': last_total
+                'inventory': first_total
+            })
+            
+            last_inventory_data.append({
+                'date': date,
+                'inventory': last_total
             })
         
-        if not daily_color_inventory:
-            fig = go.Figure()
-            fig.add_annotation(
-                text="没有库存数据",
-                xref="paper", yref="paper",
-                x=0.5, y=0.5, xanchor='center', yanchor='middle',
-                showarrow=False, font=dict(size=20)
-            )
-            return fig
+        return first_inventory_data, last_inventory_data
+    
+    def add_inventory_charts(fig, first_inventory_data, last_inventory_data):
+        """添加库存图表"""
+        if not first_inventory_data and not last_inventory_data:
+            return
         
-        color_inventory_df = pd.DataFrame(daily_color_inventory)
-        total_inventory_df = pd.DataFrame(daily_total_inventory)
+        first_inventory_df = pd.DataFrame(first_inventory_data) if first_inventory_data else pd.DataFrame()
+        last_inventory_df = pd.DataFrame(last_inventory_data) if last_inventory_data else pd.DataFrame()
         
-        # 创建五子图布局
-        fig = make_subplots(
-            rows=5, cols=1,
-            shared_xaxes=False,
-            vertical_spacing=0.08,
-            subplot_titles=(
-                '价格K线图',
-                '每天每个颜色的第一次库存数量',
-                '每天每个颜色的最后一次库存数量',
-                '每天第一次出现的总库存',
-                '每天最后一次出现的总库存'
-            ),
-            row_heights=[0.25, 0.2, 0.2, 0.175, 0.175]
-        )
-        
-        # 添加K线图（简化版）
-        daily_prices = []
-        for date in sorted(filtered_df['date'].unique()):
-            date_df = filtered_df[filtered_df['date'] == date]
-            if not date_df.empty:
-                daily_prices.append({
-                    'date': date,
-                    'price': date_df['price'].median()
-                })
-        
-        if daily_prices:
-            price_df = pd.DataFrame(daily_prices)
-            fig.add_trace(
-                go.Scatter(
-                    x=price_df['date'],
-                    y=price_df['price'],
-                    mode='lines+markers',
-                    name='价格趋势',
-                    line=dict(color='blue')
-                ),
-                row=1, col=1
-            )
-        
-        # 获取所有颜色并分配颜色
-        all_colors = sorted(color_inventory_df['color'].unique())
-        color_palette = px.colors.qualitative.Set3[:len(all_colors)]
-        color_map = dict(zip(all_colors, color_palette))
-        
-        # 添加每天每个颜色的第一次库存（柱状图）
-        for color in all_colors:
-            color_data = color_inventory_df[color_inventory_df['color'] == color]
+        # 添加第一次库存柱状图
+        if not first_inventory_df.empty:
             fig.add_trace(
                 go.Bar(
-                    x=color_data['date'],
-                    y=color_data['first_inventory'],
-                    name=f'第一次-{color}',
-                    marker_color=color_map[color],
-                    offsetgroup='first',
-                    legendgroup='first',
-                    hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>第一次库存: %{{y}}<extra></extra>'
+                    x=first_inventory_df['date'],
+                    y=first_inventory_df['inventory'],
+                    name='第一次库存',
+                    marker_color='lightblue',
+                    hovertemplate='日期: %{x}<br>第一次库存: %{y}<extra></extra>'
                 ),
                 row=2, col=1
             )
         
-        # 添加每天每个颜色的最后一次库存（柱状图）
-        for color in all_colors:
-            color_data = color_inventory_df[color_inventory_df['color'] == color]
+        # 添加最后一次库存柱状图
+        if not last_inventory_df.empty:
             fig.add_trace(
                 go.Bar(
-                    x=color_data['date'],
-                    y=color_data['last_inventory'],
-                    name=f'最后一次-{color}',
-                    marker_color=color_map[color],
-                    offsetgroup='last',
-                    legendgroup='last',
-                    hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>最后一次库存: %{{y}}<extra></extra>'
+                    x=last_inventory_df['date'],
+                    y=last_inventory_df['inventory'],
+                    name='最后一次库存',
+                    marker_color='lightcoral',
+                    hovertemplate='日期: %{x}<br>最后一次库存: %{y}<extra></extra>'
                 ),
                 row=3, col=1
             )
-        
-        # 添加每天第一次总库存
-        fig.add_trace(
-            go.Bar(
-                x=total_inventory_df['date'],
-                y=total_inventory_df['first_total'],
-                name='第一次总库存',
-                marker_color='lightblue',
-                hovertemplate='日期: %{x}<br>第一次总库存: %{y}<extra></extra>'
-            ),
-            row=4, col=1
-        )
-        
-        # 添加每天最后一次总库存
-        fig.add_trace(
-            go.Bar(
-                x=total_inventory_df['date'],
-                y=total_inventory_df['last_total'],
-                name='最后一次总库存',
-                marker_color='lightcoral',
-                hovertemplate='日期: %{x}<br>最后一次总库存: %{y}<extra></extra>'
-            ),
-            row=5, col=1
-        )
-        
-        # 更新布局
-        fig.update_layout(
-            title='每日颜色库存分析图表',
-            height=1500,
-            showlegend=True,
-            barmode='group'
-        )
-        
-        # 更新坐标轴
-        fig.update_yaxes(title_text="价格 (€)", row=1, col=1)
-        fig.update_yaxes(title_text="库存数量", row=2, col=1)
-        fig.update_yaxes(title_text="库存数量", row=3, col=1)
-        fig.update_yaxes(title_text="总库存", row=4, col=1)
-        fig.update_yaxes(title_text="总库存", row=5, col=1)
-        
-        return fig
-    
-    def process_storage_data(filtered_df):
-        """处理Storage库存数据"""
-        first_storage_data = []
-        second_storage_data = []
-        
-        for date in sorted(filtered_df['date'].unique()):
-            date_df = filtered_df[filtered_df['date'] == date]
-            
-            # 第一次Storage数据
-            first_prices = []
-            for seller in date_df['seller'].unique():
-                seller_df = date_df[date_df['seller'] == seller].sort_values('date_add_to_bag')
-                if len(seller_df) > 0:
-                    first_price_row = seller_df.iloc[0]
-                    first_prices.append({
-                        'price': first_price_row['price'],
-                        'storage': first_price_row['storage'],
-                        'seller': seller[:10] + '...' if len(str(seller)) > 10 else str(seller)
-                    })
-            
-            if first_prices:
-                prices = [item['price'] for item in first_prices]
-                median_price = np.median(prices)
-                closest_item = min(first_prices, key=lambda x: abs(x['price'] - median_price))
-                
-                first_storage_data.append({
-                    'date': date,
-                    'date_seller': str(date) + '+' + closest_item['seller'],
-                    'storage': closest_item['storage'],
-                    'storage_count': 1
-                })
-            
-            # 第二次Storage数据
-            second_prices = []
-            for seller in date_df['seller'].unique():
-                seller_df = date_df[date_df['seller'] == seller].sort_values('date_add_to_bag')
-                if len(seller_df) >= 2:
-                    second_price_row = seller_df.iloc[1]
-                    second_prices.append({
-                        'price': second_price_row['price'],
-                        'storage': second_price_row['storage'],
-                        'seller': seller[:10] + '...' if len(str(seller)) > 10 else str(seller)
-                    })
-                elif len(seller_df) == 1:
-                    second_price_row = seller_df.iloc[0]
-                    second_prices.append({
-                        'price': second_price_row['price'],
-                        'storage': second_price_row['storage'],
-                        'seller': seller[:10] + '...' if len(str(seller)) > 10 else str(seller)
-                    })
-            
-            if second_prices:
-                prices = [item['price'] for item in second_prices]
-                median_price = np.median(prices)
-                closest_item = min(second_prices, key=lambda x: abs(x['price'] - median_price))
-                
-                second_storage_data.append({
-                    'date': date,
-                    'date_seller': str(date) + '+' + closest_item['seller'],
-                    'storage': closest_item['storage'],
-                    'storage_count': 1
-                })
-        
-        return first_storage_data, second_storage_data
-    
-    def add_storage_charts(fig, first_storage_data, second_storage_data):
-        """添加Storage库存图表"""
-        if not first_storage_data and not second_storage_data:
-            return
-        
-        first_storage_df = pd.DataFrame(first_storage_data) if first_storage_data else pd.DataFrame()
-        second_storage_df = pd.DataFrame(second_storage_data) if second_storage_data else pd.DataFrame()
-        
-        # 为不同Storage类型分配颜色
-        all_storage_types = set()
-        if not first_storage_df.empty:
-            all_storage_types.update(first_storage_df['storage'].unique())
-        if not second_storage_df.empty:
-            all_storage_types.update(second_storage_df['storage'].unique())
-        
-        storage_types = sorted(list(all_storage_types))
-        colors = px.colors.qualitative.Set3[:len(storage_types)]
-        storage_color_map = dict(zip(storage_types, colors))
-        
-        # 添加第一次Storage库存柱状图
-        if not first_storage_df.empty:
-            for storage_type in storage_types:
-                storage_subset = first_storage_df[first_storage_df['storage'] == storage_type]
-                if not storage_subset.empty:
-                    fig.add_trace(
-                        go.Bar(
-                            x=storage_subset['date_seller'],
-                            y=storage_subset['storage_count'],
-                            name=f'第一次-{storage_type}',
-                            marker_color=storage_color_map[storage_type],
-                            hovertemplate=f'Storage: {storage_type}<br>日期+Seller: %{{x}}<br>中位数库存<extra></extra>'
-                        ),
-                        row=2, col=1
-                    )
-        
-        # 添加第二次Storage库存柱状图
-        if not second_storage_df.empty:
-            for storage_type in storage_types:
-                storage_subset = second_storage_df[second_storage_df['storage'] == storage_type]
-                if not storage_subset.empty:
-                    fig.add_trace(
-                        go.Bar(
-                            x=storage_subset['date_seller'],
-                            y=storage_subset['storage_count'],
-                            name=f'第二次-{storage_type}',
-                            marker_color=storage_color_map[storage_type],
-                            hovertemplate=f'Storage: {storage_type}<br>日期+Seller: %{{x}}<br>中位数库存<extra></extra>'
-                        ),
-                        row=3, col=1
-                    )
     
     return app
 
@@ -600,7 +678,9 @@ server = app.server if app is not None else None  # 暴露 server 给 Gunicorn
 
 if __name__ == '__main__':
     if app is not None:
-        app.run(debug=True, host='127.0.0.1', port=8050)
-        print("\n集成应用已启动！请在浏览器中访问: http://127.0.0.1:8050")
+        # 修改为适合Render部署的配置
+        port = int(os.environ.get('PORT', 8050))
+        app.run(host='0.0.0.0', port=port, debug=False)
+        print(f"\n集成应用已启动！请在浏览器中访问: http://0.0.0.0:{port}")
     else:
         print("应用创建失败，请检查数据")
