@@ -448,8 +448,10 @@ def create_integrated_dash_app(df):
                 
                 daily_first_color = {}
                 daily_last_color = {}
-                daily_first_sellers = {}  # 新增：记录第一次出现的seller信息
-                daily_last_sellers = {}   # 新增：记录最后一次出现的seller信息
+                daily_first_sellers = {}  
+                daily_last_sellers = {}   
+                daily_first_prices = {}   # 新增：记录第一次出现的价格信息
+                daily_last_prices = {}    # 新增：记录最后一次出现的价格信息
                 daily_first_total = 0
                 daily_last_total = 0
                 
@@ -457,9 +459,11 @@ def create_integrated_dash_app(df):
                     group = group.sort_values('date_add_to_bag')
                     color = group['color'].iloc[0]
                     
-                    # 获取seller信息
+                    # 获取seller和价格信息
                     first_seller = group['seller'].iloc[0] if 'seller' in group.columns else '未知'
                     last_seller = group['seller'].iloc[-1] if 'seller' in group.columns else '未知'
+                    first_price = group['price'].iloc[0] if 'price' in group.columns else 0
+                    last_price = group['price'].iloc[-1] if 'price' in group.columns else 0
                     
                     # 使用quantity列或记录数
                     if 'quantity' in group.columns:
@@ -487,6 +491,15 @@ def create_integrated_dash_app(df):
                     daily_first_sellers[color].append(first_seller)
                     daily_last_sellers[color].append(last_seller)
                     
+                    # 收集价格信息
+                    if color not in daily_first_prices:
+                        daily_first_prices[color] = []
+                    if color not in daily_last_prices:
+                        daily_last_prices[color] = []
+                    
+                    daily_first_prices[color].append(first_price)
+                    daily_last_prices[color].append(last_price)
+                    
                     # 累加总库存
                     daily_first_total += first_inventory
                     daily_last_total += last_inventory
@@ -497,13 +510,21 @@ def create_integrated_dash_app(df):
                     first_sellers_list = list(set(daily_first_sellers.get(color, [])))
                     last_sellers_list = list(set(daily_last_sellers.get(color, [])))
                     
+                    # 计算平均价格
+                    first_prices_list = daily_first_prices.get(color, [])
+                    last_prices_list = daily_last_prices.get(color, [])
+                    first_avg_price = sum(first_prices_list) / len(first_prices_list) if first_prices_list else 0
+                    last_avg_price = sum(last_prices_list) / len(last_prices_list) if last_prices_list else 0
+                    
                     daily_color_inventory.append({
                         'date': pd.to_datetime(date),
                         'color': color,
                         'first_inventory': daily_first_color.get(color, 0),
                         'last_inventory': daily_last_color.get(color, 0),
-                        'first_sellers': ', '.join(first_sellers_list),  # 新增
-                        'last_sellers': ', '.join(last_sellers_list)     # 新增
+                        'first_sellers': ', '.join(first_sellers_list),
+                        'last_sellers': ', '.join(last_sellers_list),
+                        'first_avg_price': first_avg_price,  # 新增：第一次平均价格
+                        'last_avg_price': last_avg_price     # 新增：最后一次平均价格
                     })
                 
                 # 记录总库存
@@ -579,14 +600,22 @@ def create_integrated_dash_app(df):
                 for color in colors_list:
                     color_data = first_color_df[first_color_df['color'] == color]
                     if not color_data.empty:
+                        # 准备customdata，包含商家和价格信息
+                        custom_data = []
+                        for _, row in color_data.iterrows():
+                            sellers = row['sellers']
+                            # 直接使用第一次出现的价格，不计算平均值
+                            prices = row.get('first_prices', '0')  # 假设数据中有first_prices字段
+                            custom_data.append([sellers, prices])
+                        
                         fig.add_trace(
                             go.Bar(
                                 x=color_data['date'],  # 直接使用日期作为x轴
                                 y=color_data['inventory'],
                                 name=f'第一次-{color}',
                                 marker_color=color_mapping[color],
-                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<br>商家: %{{customdata}}<extra></extra>',
-                                customdata=color_data['sellers'],  # 新增seller信息
+                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<br>价格: %{{customdata[1]}}€<br>商家: %{{customdata[0]}}<extra></extra>',
+                                customdata=custom_data,  # 传递商家和价格信息
                                 offsetgroup=color,  # 使用offsetgroup让同一天的不同颜色靠在一起
                                 legendgroup=f'first_{color}'
                             ),
@@ -606,14 +635,22 @@ def create_integrated_dash_app(df):
                 for color in colors_list:
                     color_data = last_color_df[last_color_df['color'] == color]
                     if not color_data.empty:
+                        # 准备customdata，包含商家和价格信息
+                        custom_data = []
+                        for _, row in color_data.iterrows():
+                            sellers = row['sellers']
+                            # 直接使用最后一次出现的价格，不计算平均值
+                            prices = row.get('last_prices', '0')  # 假设数据中有last_prices字段
+                            custom_data.append([sellers, prices])
+                        
                         fig.add_trace(
                             go.Bar(
                                 x=color_data['date'],  # 直接使用日期作为x轴
                                 y=color_data['inventory'],
                                 name=f'最后一次-{color}',
                                 marker_color=color_mapping[color],
-                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<br>商家: %{{customdata}}<extra></extra>',
-                                customdata=color_data['sellers'],  # 新增seller信息
+                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<br>价格: %{{customdata[1]}}€<br>商家: %{{customdata[0]}}<extra></extra>',
+                                customdata=custom_data,  # 传递商家和价格信息
                                 offsetgroup=color,  # 使用offsetgroup让同一天的不同颜色靠在一起
                                 legendgroup=f'last_{color}'
                             ),
