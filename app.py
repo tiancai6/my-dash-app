@@ -540,8 +540,8 @@ def create_integrated_dash_app(df):
             
             # 分离第一次和最后一次数据
             if not color_inventory_df.empty:
-                first_color_df = color_inventory_df[['date', 'color', 'first_inventory', 'first_sellers']].rename(columns={'first_inventory': 'inventory', 'first_sellers': 'sellers'})
-                last_color_df = color_inventory_df[['date', 'color', 'last_inventory', 'last_sellers']].rename(columns={'last_inventory': 'inventory', 'last_sellers': 'sellers'})
+                first_color_df = color_inventory_df[['date', 'color', 'first_inventory', 'first_sellers', 'first_avg_price']].rename(columns={'first_inventory': 'inventory', 'first_sellers': 'sellers', 'first_avg_price': 'price'})
+                last_color_df = color_inventory_df[['date', 'color', 'last_inventory', 'last_sellers', 'last_avg_price']].rename(columns={'last_inventory': 'inventory', 'last_sellers': 'sellers', 'last_avg_price': 'price'})
             else:
                 first_color_df = pd.DataFrame()
                 last_color_df = pd.DataFrame()
@@ -604,9 +604,8 @@ def create_integrated_dash_app(df):
                         custom_data = []
                         for _, row in color_data.iterrows():
                             sellers = row['sellers']
-                            # 直接使用第一次出现的价格，不计算平均值
-                            prices = row.get('first_prices', '0')  # 假设数据中有first_prices字段
-                            custom_data.append([sellers, prices])
+                            price = row['price']  # 直接使用price字段
+                            custom_data.append([sellers, price])
                         
                         fig.add_trace(
                             go.Bar(
@@ -614,7 +613,7 @@ def create_integrated_dash_app(df):
                                 y=color_data['inventory'],
                                 name=f'第一次-{color}',
                                 marker_color=color_mapping[color],
-                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<br>价格: %{{customdata[1]}}€<br>商家: %{{customdata[0]}}<extra></extra>',
+                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<br>价格: %{{customdata[1]:.2f}}€<br>商家: %{{customdata[0]}}<extra></extra>',
                                 customdata=custom_data,  # 传递商家和价格信息
                                 offsetgroup=color,  # 使用offsetgroup让同一天的不同颜色靠在一起
                                 legendgroup=f'first_{color}'
@@ -639,9 +638,8 @@ def create_integrated_dash_app(df):
                         custom_data = []
                         for _, row in color_data.iterrows():
                             sellers = row['sellers']
-                            # 直接使用最后一次出现的价格，不计算平均值
-                            prices = row.get('last_prices', '0')  # 假设数据中有last_prices字段
-                            custom_data.append([sellers, prices])
+                            price = row['price']  # 直接使用price字段
+                            custom_data.append([sellers, price])
                         
                         fig.add_trace(
                             go.Bar(
@@ -649,7 +647,7 @@ def create_integrated_dash_app(df):
                                 y=color_data['inventory'],
                                 name=f'最后一次-{color}',
                                 marker_color=color_mapping[color],
-                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<br>价格: %{{customdata[1]}}€<br>商家: %{{customdata[0]}}<extra></extra>',
+                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<br>价格: %{{customdata[1]:.2f}}€<br>商家: %{{customdata[0]}}<extra></extra>',
                                 customdata=custom_data,  # 传递商家和价格信息
                                 offsetgroup=color,  # 使用offsetgroup让同一天的不同颜色靠在一起
                                 legendgroup=f'last_{color}'
