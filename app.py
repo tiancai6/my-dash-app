@@ -608,7 +608,7 @@ if __name__ == '__main__':
                 port = int(os.environ.get('PORT', 8050))
                 
                 # 启动应用，适配Render部署
-                app.run_server(
+                app.run(
                     host='0.0.0.0',  # 允许外部访问
                     port=port,        # 使用环境变量端口
                     debug=False       # 生产环境关闭调试模式
