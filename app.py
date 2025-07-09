@@ -421,7 +421,7 @@ def create_integrated_dash_app(df):
             
             daily_df = pd.DataFrame(daily_price_data)
             
-            # ===== 库存数据处理（与Jupyter版本完全一致）=====
+            # ===== 库存数据处理（修改为包含seller信息）=====
             # 创建unique_key
             df_copy['unique_key'] = (
                 df_copy['model'].astype(str) + '_' +
@@ -448,12 +448,18 @@ def create_integrated_dash_app(df):
                 
                 daily_first_color = {}
                 daily_last_color = {}
+                daily_first_sellers = {}  # 新增：记录第一次出现的seller信息
+                daily_last_sellers = {}   # 新增：记录最后一次出现的seller信息
                 daily_first_total = 0
                 daily_last_total = 0
                 
                 for unique_key, group in grouped:
                     group = group.sort_values('date_add_to_bag')
                     color = group['color'].iloc[0]
+                    
+                    # 获取seller信息
+                    first_seller = group['seller'].iloc[0] if 'seller' in group.columns else '未知'
+                    last_seller = group['seller'].iloc[-1] if 'seller' in group.columns else '未知'
                     
                     # 使用quantity列或记录数
                     if 'quantity' in group.columns:
@@ -472,17 +478,32 @@ def create_integrated_dash_app(df):
                     daily_first_color[color] = daily_first_color.get(color, 0) + first_inventory
                     daily_last_color[color] = daily_last_color.get(color, 0) + last_inventory
                     
+                    # 收集seller信息
+                    if color not in daily_first_sellers:
+                        daily_first_sellers[color] = []
+                    if color not in daily_last_sellers:
+                        daily_last_sellers[color] = []
+                    
+                    daily_first_sellers[color].append(first_seller)
+                    daily_last_sellers[color].append(last_seller)
+                    
                     # 累加总库存
                     daily_first_total += first_inventory
                     daily_last_total += last_inventory
                 
-                # 记录每个颜色的库存
+                # 记录每个颜色的库存和seller信息
                 for color in set(list(daily_first_color.keys()) + list(daily_last_color.keys())):
+                    # 处理seller信息，去重并合并
+                    first_sellers_list = list(set(daily_first_sellers.get(color, [])))
+                    last_sellers_list = list(set(daily_last_sellers.get(color, [])))
+                    
                     daily_color_inventory.append({
                         'date': pd.to_datetime(date),
                         'color': color,
                         'first_inventory': daily_first_color.get(color, 0),
-                        'last_inventory': daily_last_color.get(color, 0)
+                        'last_inventory': daily_last_color.get(color, 0),
+                        'first_sellers': ', '.join(first_sellers_list),  # 新增
+                        'last_sellers': ', '.join(last_sellers_list)     # 新增
                     })
                 
                 # 记录总库存
@@ -498,8 +519,8 @@ def create_integrated_dash_app(df):
             
             # 分离第一次和最后一次数据
             if not color_inventory_df.empty:
-                first_color_df = color_inventory_df[['date', 'color', 'first_inventory']].rename(columns={'first_inventory': 'inventory'})
-                last_color_df = color_inventory_df[['date', 'color', 'last_inventory']].rename(columns={'last_inventory': 'inventory'})
+                first_color_df = color_inventory_df[['date', 'color', 'first_inventory', 'first_sellers']].rename(columns={'first_inventory': 'inventory', 'first_sellers': 'sellers'})
+                last_color_df = color_inventory_df[['date', 'color', 'last_inventory', 'last_sellers']].rename(columns={'last_inventory': 'inventory', 'last_sellers': 'sellers'})
             else:
                 first_color_df = pd.DataFrame()
                 last_color_df = pd.DataFrame()
@@ -564,7 +585,8 @@ def create_integrated_dash_app(df):
                                 y=color_data['inventory'],
                                 name=f'第一次-{color}',
                                 marker_color=color_mapping[color],
-                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<extra></extra>',
+                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<br>商家: %{{customdata}}<extra></extra>',
+                                customdata=color_data['sellers'],  # 新增seller信息
                                 offsetgroup=color,  # 使用offsetgroup让同一天的不同颜色靠在一起
                                 legendgroup=f'first_{color}'
                             ),
@@ -590,7 +612,8 @@ def create_integrated_dash_app(df):
                                 y=color_data['inventory'],
                                 name=f'最后一次-{color}',
                                 marker_color=color_mapping[color],
-                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<extra></extra>',
+                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<br>商家: %{{customdata}}<extra></extra>',
+                                customdata=color_data['sellers'],  # 新增seller信息
                                 offsetgroup=color,  # 使用offsetgroup让同一天的不同颜色靠在一起
                                 legendgroup=f'last_{color}'
                             ),
