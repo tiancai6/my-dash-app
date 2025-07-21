@@ -1,6 +1,9 @@
+dash==3.1.1
+plotly==5.24.1
+pandas==2.2.3
+numpy==2.2.1
 matplotlib==3.9.4
 pytz==2024.2
 openpyxl==3.1.5
 gunicorn==22.0.0
 dash-bootstrap-components>=1.4.0
-gunicorn>=20.1.0
