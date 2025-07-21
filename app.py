@@ -52,7 +52,7 @@ def load_ipad_data():
     nami为'纳米'时，将容量末尾加1，处理后删除nami列。
     返回处理后的DataFrame。
     """
-    ipad_file = r".\processed_data\bm数据截止至0718.xlsx"
+    ipad_file = r"e:\项目\app\processed_data\bm数据截止至0718.xlsx"
     use_cols = [
         '标题', '磨损中文', '容量', 'wifi类型', 'nami类型中文', '颜色中文', '价格处理后（欧元）', '国家', '日期',
         '商家名称', '商家增值税号', '商家存在年月'
@@ -70,6 +70,12 @@ def load_ipad_data():
         df = df.dropna(subset=['标题', '价格处理后（欧元）', '日期'])
         df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
         df = df.dropna(subset=['日期'])
+        print("iPad数据行数：", len(df))
+        print("iPad数据字段：", df.columns)
+        if '磨损中文' in df.columns:
+            print("磨损唯一值：", df['磨损中文'].unique())
+        else:
+            print("无磨损字段")
         return df
     except Exception as e:
         print(f"读取iPad数据失败: {e}")
@@ -304,18 +310,24 @@ def create_integrated_dash_app(df):
         if selected_tab == 'ipad-analysis':
             # 获取iPad数据，以便提取国家和磨损选项
             ipad_df = load_ipad_data()
+            print("\n=== iPad筛选器选项生成 ===")
+            
             # 国家选项
             country_options = [{'label': '全部', 'value': '全部'}]
             if not ipad_df.empty and '国家' in ipad_df.columns:
                 country_options += [
                     {'label': str(x), 'value': str(x)} for x in sorted(ipad_df['国家'].dropna().unique())
                 ]
+            print(f"国家选项: {[opt['value'] for opt in country_options]}")
+            
             # 磨损选项
             grade_options_ipad = [{'label': '全部', 'value': '全部'}]
             if not ipad_df.empty and '磨损中文' in ipad_df.columns:
                 grade_options_ipad += [
                     {'label': str(x), 'value': str(x)} for x in sorted(ipad_df['磨损中文'].dropna().unique())
                 ]
+            print(f"磨损选项: {[opt['value'] for opt in grade_options_ipad]}")
+            
             # 第一行：型号、内存、SIM类型
             first_row = html.Div([
                 html.Label("型号:"),
@@ -368,12 +380,11 @@ def create_integrated_dash_app(df):
         [Input('unified-model-dropdown', 'value'),
          Input('unified-memory-dropdown', 'value'),
          Input('unified-sim-dropdown', 'value')],
-        [State('grade-dropdown', 'value'),
-         State('battery-dropdown', 'value'),
-         State('local-dropdown', 'value')],
+        [State('ipad-grade-dropdown', 'value'),
+         State('country-dropdown', 'value')],
         prevent_initial_call=True
     )
-    def update_all_filter_state(model_val, memory_val, sim_val, grade_val, battery_val, local_val):
+    def update_all_filter_state(model_val, memory_val, sim_val, grade_val, country_val):
         # 更新全局筛选器状态
         if model_val is not None:
             GLOBAL_FILTER_STATE['model'] = model_val
@@ -383,10 +394,8 @@ def create_integrated_dash_app(df):
             GLOBAL_FILTER_STATE['sim_type'] = sim_val
         if grade_val is not None:
             GLOBAL_FILTER_STATE['grade'] = grade_val
-        if battery_val is not None:
-            GLOBAL_FILTER_STATE['battery'] = battery_val
-        if local_val is not None:
-            GLOBAL_FILTER_STATE['local'] = local_val
+        if country_val is not None:
+            GLOBAL_FILTER_STATE['local'] = country_val  # 用country_val更新local状态
         return ''
     
     # 第一个回调：处理original-analysis标签页（包含所有筛选器）
@@ -530,31 +539,53 @@ def create_integrated_dash_app(df):
             Input('unified-memory-dropdown', 'value'),
             Input('unified-sim-dropdown', 'value'),
             Input('ipad-grade-dropdown', 'value'),
-            Input('battery-dropdown', 'value'),
             Input('country-dropdown', 'value')
         ],
         prevent_initial_call=True
     )
-    def update_ipad_box_chart(selected_tab, model_val, memory_val, sim_val, grade_val, battery_val, country_val):
+    def update_ipad_box_chart(selected_tab, model_val, memory_val, sim_val, grade_val, country_val):
         if selected_tab != 'ipad-analysis':
             raise PreventUpdate
+        print("\n=== iPad箱型图分析调试 ===")
+        print("筛选参数：")
+        print(f"型号: {model_val}")
+        print(f"内存: {memory_val}")
+        print(f"SIM类型: {sim_val}")
+        print(f"磨损: {grade_val}")
+        print(f"国家: {country_val}")
+        
         df = load_ipad_data()
+        print(f"\n初始数据行数: {len(df)}")
+        
         if model_val and model_val != '全部':
             df = df[df['标题'] == model_val]
+            print(f"型号筛选后行数: {len(df)}")
+        
         if grade_val and grade_val != '全部':
-            df = df[df['磨损中文'] == grade_val]
+            print(f"磨损唯一值: {df['磨损中文'].unique()}")
+            df = df[df['磨损中文'].astype(str) == str(grade_val)]
+            print(f"磨损筛选后行数: {len(df)}")
+        
         if memory_val and memory_val != '全部':
             try:
                 df = df[df['容量'] == int(memory_val)]
             except Exception:
                 df = df[df['容量'] == memory_val]
+            print(f"内存筛选后行数: {len(df)}")
+        
         if sim_val and sim_val != '全部':
             df = df[df['wifi类型'] == sim_val]
-        if battery_val and battery_val != '全部':
-            # iPad数据没有电池字段，跳过
-            pass
+            print(f"SIM类型筛选后行数: {len(df)}")
+        
         if country_val and country_val != '全部':
             df = df[df['国家'] == country_val]
+            print(f"国家筛选后行数: {len(df)}")
+        
+        print(f"\n最终数据行数: {len(df)}")
+        if df.empty:
+            print("警告：筛选后数据为空！")
+            return html.Div("无数据")
+            
         fig = plot_ipad_box(df)
         return dcc.Graph(figure=fig)
     
@@ -1370,7 +1401,11 @@ def create_integrated_dash_app(df):
             yaxis_title='价格（欧元）',
             height=500,
             showlegend=False,
-            xaxis=dict(type='category', categoryorder='category ascending'),
+            xaxis=dict(
+                type='category',
+                categoryorder='category ascending',
+                tickangle=30  # 添加这一行，设置x轴标签旋转30度
+            ),
             yaxis=dict(tickformat=',.0f')
         )
         return fig
