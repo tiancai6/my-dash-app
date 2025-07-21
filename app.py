@@ -52,7 +52,7 @@ def load_ipad_data():
     nami为'纳米'时，将容量末尾加1，处理后删除nami列。
     返回处理后的DataFrame。
     """
-    ipad_file = r"e:\项目\app\processed_data\bm数据截止至0718.xlsx"
+    ipad_file = r"./processed_data/7月bm数据-7.21.xlsx"
     use_cols = [
         '标题', '磨损中文', '容量', 'wifi类型', 'nami类型中文', '颜色中文', '价格处理后（欧元）', '国家', '日期',
         '商家名称', '商家增值税号', '商家存在年月'
