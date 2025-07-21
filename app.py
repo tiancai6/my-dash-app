@@ -24,7 +24,7 @@ def load_excel_data():
     """从处理好的文件中加载Excel数据"""
     try:
         # 读取处理好的Excel数据的两个工作表
-        excel_file_path = ".\\processed_data\\excel_data.xlsx"
+        excel_file_path = "./processed_data/excel_data.xlsx"
         
         # 读取讯强数据工作表
         xq_data = pd.read_excel(excel_file_path, sheet_name='讯强全新机')
@@ -1379,7 +1379,7 @@ def create_integrated_dash_app(df):
 
 # 模块级别定义 app 和 server
 # 改为直接读取处理好的原始数据文件
-processed_df = pd.read_excel(".\\processed_data\\original_data.xlsx")
+processed_df = pd.read_excel("./processed_data/original_data.xlsx")
 app = create_integrated_dash_app(processed_df)
 server = app.server if app is not None else None  # 暴露 server 给 Gunicorn
 
