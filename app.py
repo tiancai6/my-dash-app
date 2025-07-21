@@ -24,7 +24,7 @@ def load_excel_data():
     """从处理好的文件中加载Excel数据"""
     try:
         # 读取处理好的Excel数据的两个工作表
-        excel_file_path = "e:\\项目\\app\\processed_data\\excel_data.xlsx"
+        excel_file_path = ".\\processed_data\\excel_data.xlsx"
         
         # 读取讯强数据工作表
         xq_data = pd.read_excel(excel_file_path, sheet_name='讯强全新机')
@@ -52,7 +52,7 @@ def load_ipad_data():
     nami为'纳米'时，将容量末尾加1，处理后删除nami列。
     返回处理后的DataFrame。
     """
-    ipad_file = r"e:\项目\app\processed_data\bm数据截止至0718.xlsx"
+    ipad_file = r".\processed_data\bm数据截止至0718.xlsx"
     use_cols = [
         '标题', '磨损中文', '容量', 'wifi类型', 'nami类型中文', '颜色中文', '价格处理后（欧元）', '国家', '日期',
         '商家名称', '商家增值税号', '商家存在年月'
