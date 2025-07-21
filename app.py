@@ -1379,7 +1379,7 @@ def create_integrated_dash_app(df):
 
 # 模块级别定义 app 和 server
 # 改为直接读取处理好的原始数据文件
-processed_df = pd.read_excel("e:\\项目\\app\\processed_data\\original_data.xlsx")
+processed_df = pd.read_excel(".\\processed_data\\original_data.xlsx")
 app = create_integrated_dash_app(processed_df)
 server = app.server if app is not None else None  # 暴露 server 给 Gunicorn
 
