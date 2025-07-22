@@ -1,723 +1,92 @@
+import dash
+from dash import dcc, html, Input, Output
+from dash.dependencies import Input, Output, State
+from dash.exceptions import PreventUpdate
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import pytz
-from datetime import datetime, timedelta
-
-plt.rcParams["font.sans-serif"] = "SimHei"
-plt.rcParams["axes.unicode_minus"] = False
-
-# 在文件开头添加新的导入
+import plotly.express as px
 import json
 import os
 
-# 新增Excel数据加载函数
+# 全局筛选器状态
+GLOBAL_FILTER_STATE = {
+    'model': '全部',
+    'memory': '全部', 
+    'sim_type': '全部',
+    'grade': '全部',
+    'battery': '全部',
+    'local': '全部'
+}
+
 def load_excel_data():
-    """加载Excel数据"""
+    """从处理好的文件中加载Excel数据"""
     try:
-        excel_file = "e:\\项目\\app\\数据汇总后用于分析（定期更新模板）.xlsx"
+        # 读取处理好的Excel数据的两个工作表
+        excel_file_path = "./processed_data/excel_data.xlsx"
         
-        # 读取讯强全新机数据
-        xq_data = pd.read_excel(excel_file, sheet_name="讯强全新机")
+        # 读取讯强数据工作表
+        xq_data = pd.read_excel(excel_file_path, sheet_name='讯强全新机')
+        print(f"讯强数据行数: {len(xq_data)}")
         
-        # 读取靓机汇二手回收数据
-        ljh_data = pd.read_excel(excel_file, sheet_name="靓机汇二手回收")
+        # 读取靓机汇数据工作表
+        ljh_data = pd.read_excel(excel_file_path, sheet_name='靓机汇二手回收')
+        print(f"靓机汇数据行数: {len(ljh_data)}")
+        
+        print(f"总数据行数: {len(xq_data) + len(ljh_data)}")
         
         return xq_data, ljh_data
     except Exception as e:
-        print(f"读取Excel文件失败: {e}")
+        print(f"读取处理后的Excel文件失败: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
 def process_memory_column(df, memory_col='内存'):
-    """处理内存列，去除G并转换为整数"""
-    if memory_col in df.columns:
-        df[memory_col] = df[memory_col].astype(str).str.replace('G', '').str.replace('g', '')
-        # 处理纳米：将"纳米"替换为"1"
-        df[memory_col] = df[memory_col].str.replace('纳米', '1')
-        df[memory_col] = pd.to_numeric(df[memory_col], errors='coerce')
+    """处理内存列（数据已预处理，保持函数接口一致）"""
+    # 数据已经在process_and_export.py中处理过，这里只是保持接口一致
     return df
 
-def prepare_data():
-    """完整的数据读取和预处理函数"""
-    # 步骤1: 读取 Excel（或 CSV）
-    df = pd.read_excel("e:\项目\补全后的库存数据_20250717_181814.xlsx", sheet_name="库存信息")
-    print(f"步骤1 - 原始数据读取完成，总行数: {len(df)}")
-    
-    # 步骤2: 数据清洗 - 移除无关列（包括"日期"列）
-    columns_to_keep = ['型号', '磨损中文','battery(1新,0旧)', 'storage', '颜色中文', 'sim类型', 'quantity_max', 'local','price', 'date_add_to_bag','商家','merchant_public_id']
-    df_before_column_filter = df.copy()
-    df = df[columns_to_keep].copy()
-    print(f"步骤2 - 选择指定列后，行数: {len(df)} (无变化，只是选择了列)")
-    
-    # 步骤3: 重命名列为英文，方便处理
-    df.columns = ['model', 'grade_name','battery', 'storage', 'color', 'sim_type', 'quantity', 'local', 'price', 'date_add_to_bag','seller','merchant_public_id']
-    print(f"步骤3 - 重命名列后，行数: {len(df)} (无变化，只是重命名)")
-    
-    # 步骤4: 数据类型转换
-    df_before_type_conversion = df.copy()
-    df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0).astype(int)
-    df['price'] = pd.to_numeric(df['price'], errors='coerce').fillna(0)
-    df['date_add_to_bag'] = pd.to_datetime(df['date_add_to_bag'], errors='coerce')
-    print(f"步骤4 - 数据类型转换后，行数: {len(df)} (无变化，只是转换类型)")
-    
-    # 步骤5: 移除无效行（缺失关键字段）
-    df_before_dropna = df.copy()
-    df_after_dropna = df.dropna(subset=['model', 'storage', 'sim_type', 'date_add_to_bag'])
-    
-    # 记录被删除的数据
-    dropped_rows = df_before_dropna[~df_before_dropna.index.isin(df_after_dropna.index)]
-    if len(dropped_rows) > 0:
-        dropped_rows_copy = dropped_rows.copy()
-        dropped_rows_copy['删除原因'] = '关键字段缺失(model/storage/sim_type/date_add_to_bag)'
-        dropped_rows_copy['删除步骤'] = '步骤5-移除关键字段缺失'
-        dropped_rows_copy.to_csv('e:\\项目\\app\\步骤5_删除的关键字段缺失数据.csv', index=False, encoding='utf-8-sig')
-        print(f"步骤5 - 移除关键字段缺失行: 删除 {len(dropped_rows)} 条，剩余 {len(df_after_dropna)} 条")
-        print(f"       删除的数据已保存到: 步骤5_删除的关键字段缺失数据.csv")
-    else:
-        print(f"步骤5 - 移除关键字段缺失行: 无数据被删除，行数: {len(df_after_dropna)}")
-    
-    df = df_after_dropna
-    
-    # 步骤6: 时区转换
-    # def convert_to_china_time(dt):
-    #     if pd.isna(dt):
-    #         return dt
-    #     france_tz = pytz.timezone('Europe/Paris')
-    #     china_tz = pytz.timezone('Asia/Shanghai')
-    #     dt_france = france_tz.localize(dt)
-    #     dt_china = dt_france.astimezone(china_tz)
-    #     return dt_china
-    
-    # df['date_add_to_bag'] = df['date_add_to_bag'].apply(convert_to_china_time)
-    df['date'] = df['date_add_to_bag'].dt.date
-    print(f"步骤6 - 保持法国时区，添加date列后，行数: {len(df)} (无变化，保持原始时区)")
-    
-    # 步骤7: storage单位处理 - 智能处理，保留原本就是数值的
-    df_before_storage = df.copy()
-    
-    # 先检查storage列的数据类型分布
-    print(f"步骤7 - storage处理前分析:")
-    
-    # 统计不同类型的storage数据
-    storage_stats = {
-        '包含GB的': 0,
-        '包含Go的': 0, 
-        '包含其他G字符的': 0,
-        '包含纳米的': 0,
-        '纯数字的': 0,
-        '其他格式的': 0
-    }
-    
-    for idx, storage_val in df['storage'].items():
-        if pd.isna(storage_val):
-            continue
-        storage_str = str(storage_val)
-        
-        if 'GB' in storage_str:
-            storage_stats['包含GB的'] += 1
-        elif 'Go' in storage_str:
-            storage_stats['包含Go的'] += 1
-        elif '纳米' in storage_str:
-            storage_stats['包含纳米的'] += 1
-        elif 'G' in storage_str and not storage_str.replace('G', '').replace('.', '').isdigit():
-            storage_stats['包含其他G字符的'] += 1
-        else:
-            # 尝试转换为数字
-            try:
-                float(storage_str)
-                storage_stats['纯数字的'] += 1
-            except ValueError:
-                storage_stats['其他格式的'] += 1
-    
-    # 打印统计信息
-    for key, count in storage_stats.items():
-        if count > 0:
-            print(f"       {key}: {count} 条")
-    
-    # 处理storage：移除GB、Go单位，纳米替换为1，最后转为整数
-    def clean_storage(storage_val):
-        if pd.isna(storage_val):
-            return None
-        storage_str = str(storage_val)
-        # 移除GB和Go单位
-        cleaned = storage_str.replace('GB', '').replace('Go', '').strip()
-        # 纳米替换为1
-        cleaned = cleaned.replace('纳米', '1')
-        try:
-            return int(float(cleaned))  # 先转float再转int，处理小数情况
-        except (ValueError, TypeError):
-            return None  # 无法转换的设为None
-    
-    df['storage'] = df['storage'].apply(clean_storage)
-    
-    # 移除storage为None的行
-    before_count = len(df)
-    df = df.dropna(subset=['storage'])
-    after_count = len(df)
-    if before_count != after_count:
-        print(f"步骤7 - storage处理: 删除了 {before_count - after_count} 条无效storage数据")
-    
-    print(f"步骤7 - storage处理完成后，行数: {len(df)} (已转换为int类型)")
-    
-    # 步骤8: 按加入购物车时间排序
-    df = df.sort_values('date_add_to_bag').reset_index(drop=True)
-    print(f"步骤8 - 按时间排序后，行数: {len(df)} (无变化，只是排序)")
-    
-    print(f"\n=== 数据预处理完成 ===")
-    print(f"最终数据行数: {len(df)}")
-    
-    return df
-
-def validate_price_by_grade(df):
-    """根据grade_name等级验证价格有效性"""
-    # 记录删除前的数据条数
-    original_count = len(df)
-    print(f"价格验证前数据条数: {original_count}")
-    
-    # 提取等级数字（假设grade_name包含1-4的数字）
-    def extract_grade_number(grade_name):
-        if pd.isna(grade_name):
-            return None
-        grade_str = str(grade_name)
-        for i in range(1, 5):  # 1-4等级
-            if str(i) in grade_str:
-                return i
-        return None
-    
-    df['grade_number'] = df['grade_name'].apply(extract_grade_number)
-    
-    # 移除无法提取等级的记录
-    df_before_grade_filter = df.copy()
-    df = df.dropna(subset=['grade_number'])
-    df['grade_number'] = df['grade_number'].astype(int)
-    
-    grade_filter_removed = len(df_before_grade_filter) - len(df)
-    if grade_filter_removed > 0:
-        print(f"移除无法提取等级的记录: {grade_filter_removed} 条")
-    
-    # 重新创建unique_id来识别每个唯一组合
-    unique_fields = ['model', 'grade_name', 'battery', 'storage', 'color', 'sim_type', 'local']
-    df['unique_id'] = df[unique_fields].astype(str).agg('_'.join, axis=1)
-    
-    # 按unique_id和日期分组，然后按时间排序来识别第一次和最后一次
-    df_sorted = df.sort_values(['unique_id', 'date', 'date_add_to_bag'])
-    
-    # 为每个unique_id和date组合标记第一次和最后一次
-    df_sorted['record_order'] = df_sorted.groupby(['unique_id', 'date']).cumcount() + 1
-    df_sorted['total_records'] = df_sorted.groupby(['unique_id', 'date'])['unique_id'].transform('count')
-    
-    # 标记是否为第一次或最后一次
-    df_sorted['is_first'] = df_sorted['record_order'] == 1
-    df_sorted['is_last'] = df_sorted['record_order'] == df_sorted['total_records']
-    
-    valid_records = []
-    removed_count = 0
-    
-    # 分别处理第一次和最后一次的数据
-    for time_type in ['first', 'last']:
-        if time_type == 'first':
-            current_df = df_sorted[df_sorted['is_first']].copy()
-            print(f"\n处理第一次数据，共 {len(current_df)} 条")
-        else:
-            current_df = df_sorted[df_sorted['is_last']].copy()
-            print(f"\n处理最后一次数据，共 {len(current_df)} 条")
-        
-        if len(current_df) == 0:
-            continue
-            
-        # 按条件分组（不包括grade_name，因为我们要在组内比较不同等级）
-        group_columns = ['model', 'battery', 'storage', 'color', 'sim_type', 'local', 'date']
-        grouped = current_df.groupby(group_columns)
-        
-        time_removed_count = 0
-        
-        for group_key, group_data in grouped:
-            if len(group_data) <= 1:
-                # 只有一条记录，直接保留
-                valid_records.extend(group_data.to_dict('records'))
-                continue
-            
-            # 按等级排序
-            group_sorted = group_data.sort_values('grade_number')
-            
-            # 获取每个等级的价格
-            grade_prices = {}
-            for _, row in group_sorted.iterrows():
-                grade = row['grade_number']
-                price = row['price']
-                if grade not in grade_prices:
-                    grade_prices[grade] = []
-                grade_prices[grade].append((row.name, price))
-            
-            # 验证价格逻辑并标记要删除的记录
-            indices_to_remove = set()
-            
-            # 规则1：如果等级1不是所有等级中价格最小的，则删除等级1
-            if 1 in grade_prices:
-                grade1_prices = [price for _, price in grade_prices[1]]
-                all_other_prices = []
-                for g in [2, 3, 4]:
-                    if g in grade_prices:
-                        all_other_prices.extend([price for _, price in grade_prices[g]])
-                
-                if all_other_prices:
-                    min_grade1 = min(grade1_prices)
-                    min_others = min(all_other_prices)
-                    if min_grade1 >= min_others:
-                        # 删除所有等级1的记录
-                        for idx, _ in grade_prices[1]:
-                            indices_to_remove.add(idx)
-                            time_removed_count += 1
-            
-            # 规则2：如果等级2的价格不比等级3小，则删除等级2
-            if 2 in grade_prices and 3 in grade_prices:
-                grade2_prices = [price for _, price in grade_prices[2]]
-                grade3_prices = [price for _, price in grade_prices[3]]
-                
-                min_grade2 = min(grade2_prices)
-                min_grade3 = min(grade3_prices)
-                
-                if min_grade2 >= min_grade3:
-                    # 删除所有等级2的记录
-                    for idx, _ in grade_prices[2]:
-                        indices_to_remove.add(idx)
-                        time_removed_count += 1
-            
-            # 规则3：如果等级3的价格不比等级4小，则删除等级3
-            if 3 in grade_prices and 4 in grade_prices:
-                grade3_prices = [price for _, price in grade_prices[3]]
-                grade4_prices = [price for _, price in grade_prices[4]]
-                
-                min_grade3 = min(grade3_prices)
-                min_grade4 = min(grade4_prices)
-                
-                if min_grade3 >= min_grade4:
-                    # 删除所有等级3的记录
-                    for idx, _ in grade_prices[3]:
-                        indices_to_remove.add(idx)
-                        time_removed_count += 1
-            
-            # 保留未被标记删除的记录
-            for _, row in group_sorted.iterrows():
-                if row.name not in indices_to_remove:
-                    valid_records.append(row.to_dict())
-        
-        print(f"{time_type}数据删除了 {time_removed_count} 条")
-        removed_count += time_removed_count
-    
-    # 创建新的DataFrame
-    result_df = pd.DataFrame(valid_records)
-    
-    # 删除临时列
-    temp_columns = ['grade_number', 'unique_id', 'record_order', 'total_records', 'is_first', 'is_last']
-    for col in temp_columns:
-        if col in result_df.columns:
-            result_df = result_df.drop(col, axis=1)
-    
-    # 记录删除后的数据条数
-    final_count = len(result_df)
-    total_removed = original_count - final_count
-    
-    print(f"\n价格验证后数据条数: {final_count}")
-    print(f"总共删除数据条数: {total_removed}")
-    print(f"其中因价格逻辑不符删除: {removed_count} 条")
-    
-    return result_df
-
-def predict_seller_change(df, current_seller, unique_id, current_date, days=7):
+def load_ipad_data():
     """
-    预测商家变化
-    
-    Args:
-        df: 数据框
-        current_seller: 当前商家
-        unique_id: 唯一标识符
-        current_date: 当前日期
-        days: 历史数据天数
-    
-    Returns:
-        predicted_seller: 预测的商家
-        change_prob: 变化概率
+    读取并处理bm_ipad数据截止至0707.xlsx，保留指定12列，按9列去重。
+    nami为'纳米'时，将容量末尾加1，处理后删除nami列。
+    返回处理后的DataFrame。
     """
+    ipad_file = r"./processed_data/7月bm数据-7.21.xlsx"
+    use_cols = [
+        '标题', '磨损中文', '容量', 'wifi类型', 'nami类型中文', '颜色中文', '价格处理后（欧元）', '国家', '日期',
+        '商家名称', '商家增值税号', '商家存在年月'
+    ]
     try:
-        # 获取历史数据
-        end_date = pd.to_datetime(current_date)
-        start_date = end_date - timedelta(days=days)
-        
-        # 筛选相同产品的历史数据
-        historical_data = df[
-            (df['unique_id'] == unique_id) & 
-            (pd.to_datetime(df['date_add_to_bag']).dt.tz_localize(None) >= start_date.tz_localize(None)) & 
-            (pd.to_datetime(df['date_add_to_bag']).dt.tz_localize(None) < end_date.tz_localize(None))
-        ].copy()
-        
-        if len(historical_data) == 0:
-            # 没有历史数据，假设商家不变
-            return current_seller, 0.1
-        
-        # 分析商家变化模式
-        seller_counts = historical_data['seller'].value_counts()
-        
-        if len(seller_counts) == 1:
-            # 只有一个商家，变化概率较低
-            return current_seller, 0.2
-        
-        # 计算最常见的商家
-        most_common_seller = seller_counts.index[0]
-        most_common_count = seller_counts.iloc[0]
-        
-        # 计算变化概率
-        total_records = len(historical_data)
-        stability_ratio = most_common_count / total_records
-        
-        if most_common_seller == current_seller:
-            # 当前商家是最常见的，变化概率较低
-            change_prob = 1 - stability_ratio
-            predicted_seller = current_seller
+        df = pd.read_excel(ipad_file, usecols=use_cols,sheet_name='数据源')
+        # 处理nami列：为'纳米'时，容量末尾加1
+        mask_nami = df['nami类型中文'] == '纳米'
+        df.loc[mask_nami, '容量'] = df.loc[mask_nami, '容量'].astype(str) + '1'
+        df = df.drop(columns=['nami类型中文'])
+        # 转为int类型
+        df['容量'] = df['容量'].astype(int)
+        dedup_cols = ['标题', '磨损中文', '容量', 'wifi类型', '颜色中文', '价格处理后（欧元）', '国家', '日期']
+        df = df.drop_duplicates(subset=dedup_cols, keep='first')
+        df = df.dropna(subset=['标题', '价格处理后（欧元）', '日期'])
+        df['日期'] = pd.to_datetime(df['日期'], errors='coerce')
+        df = df.dropna(subset=['日期'])
+        print("iPad数据行数：", len(df))
+        print("iPad数据字段：", df.columns)
+        if '磨损中文' in df.columns:
+            print("磨损唯一值：", df['磨损中文'].unique())
         else:
-            # 当前商家不是最常见的，可能会变化
-            change_prob = stability_ratio
-            predicted_seller = most_common_seller
-        
-        # 限制概率范围
-        change_prob = max(0.1, min(0.9, change_prob))
-        
-        return predicted_seller, change_prob
-        
+            print("无磨损字段")
+        return df
     except Exception as e:
-        print(f"预测商家变化时出错: {e}")
-        return current_seller, 0.1
-
-def get_seller_historical_data(df, seller, unique_id, current_date, days=7):
-    """
-    获取指定商家的历史数据
-    
-    Args:
-        df: 数据框
-        seller: 商家名称
-        unique_id: 唯一标识符
-        current_date: 当前日期
-        days: 历史数据天数
-    
-    Returns:
-        historical_data: 历史数据DataFrame
-    """
-    try:
-        # 获取历史数据
-        end_date = pd.to_datetime(current_date)
-        start_date = end_date - timedelta(days=days)
-        
-        # 筛选指定商家和产品的历史数据
-        historical_data = df[
-            (df['seller'] == seller) &
-            (df['unique_id'] == unique_id) & 
-            (pd.to_datetime(df['date_add_to_bag']).dt.tz_localize(None) >= start_date.tz_localize(None)) & 
-            (pd.to_datetime(df['date_add_to_bag']).dt.tz_localize(None) < end_date.tz_localize(None))
-        ].copy()
-        
-        return historical_data
-        
-    except Exception as e:
-        print(f"获取商家历史数据时出错: {e}")
+        print(f"读取iPad数据失败: {e}")
         return pd.DataFrame()
 
-def estimate_seller_inventory_trend(seller_historical_data, seller):
+def create_integrated_dash_app(df):
     """
-    估算商家库存变化趋势
-    
-    Args:
-        seller_historical_data: 商家历史数据
-        seller: 商家名称
-    
-    Returns:
-        inventory_trend: 库存趋势系数
+    创建集成的Plotly Dash交互式网页应用
+    包含原有功能和新增Excel数据分析
     """
-    try:
-        if len(seller_historical_data) == 0:
-            return 1.0  # 默认无变化
-        
-        # 计算平均库存变化
-        if 'quantity' in seller_historical_data.columns:
-            quantities = seller_historical_data['quantity'].dropna()
-            if len(quantities) > 1:
-                # 计算库存变化趋势
-                trend = quantities.iloc[-1] / quantities.iloc[0] if quantities.iloc[0] != 0 else 1.0
-                # 限制趋势范围
-                trend = max(0.5, min(2.0, trend))
-                return trend
-        
-        return 1.0  # 默认无变化
-        
-    except Exception as e:
-        print(f"估算库存趋势时出错: {e}")
-        return 1.0
-
-def estimate_seller_price_strategy(seller_historical_data, seller, current_price):
-    """
-    估算商家价格策略对库存的影响
-    
-    Args:
-        seller_historical_data: 商家历史数据
-        seller: 商家名称
-        current_price: 当前价格
-    
-    Returns:
-        price_impact: 价格影响系数
-    """
-    try:
-        if len(seller_historical_data) == 0:
-            return 1.0  # 默认无影响
-        
-        # 分析价格与库存的关系
-        if 'price' in seller_historical_data.columns and 'quantity' in seller_historical_data.columns:
-            price_data = seller_historical_data[['price', 'quantity']].dropna()
-            if len(price_data) > 1:
-                # 计算价格变化对库存的影响
-                avg_price = price_data['price'].mean()
-                if avg_price != 0:
-                    price_ratio = current_price / avg_price
-                    # 价格越高，库存影响越小（假设需求下降）
-                    price_impact = 1.0 / price_ratio if price_ratio > 1 else price_ratio
-                    # 限制影响范围
-                    price_impact = max(0.7, min(1.3, price_impact))
-                    return price_impact
-        
-        return 1.0  # 默认无影响
-        
-    except Exception as e:
-        print(f"估算价格策略影响时出错: {e}")
-        return 1.0
-
-def process_unique_records_per_day_with_seller_focus(df):
-    """
-    优先基于第一次商家的近期销售数据进行估算
-    """
-    # 定义用于创建唯一值的字段
-    unique_fields = ['model', 'grade_name', 'battery', 'storage', 'color', 'sim_type', 'local']
-    
-    # 创建唯一标识符
-    df['unique_id'] = df[unique_fields].astype(str).agg('_'.join, axis=1)
-    
-    # 按唯一标识符和日期分组
-    grouped = df.groupby(['unique_id', 'date'])
-    
-    processed_records = []
-    estimated_records = []
-    
-    for (unique_id, date), group in grouped:
-        group_sorted = group.sort_values('date_add_to_bag')
-        
-        if len(group_sorted) == 1:
-            original_record = group_sorted.iloc[0].copy()
-            first_seller = original_record['seller']
-            
-            # 原始记录
-            original_record['is_estimated'] = False
-            original_record['estimation_method'] = 'original'
-            processed_records.append(original_record)
-            
-            # ========== 注释掉估算逻辑部分 ==========
-            # # 预测商家变化
-            # predicted_seller, change_prob = predict_seller_change(
-            #     df, first_seller, unique_id, date
-            # )
-            # 
-            # # 创建估算记录
-            # estimated_record = original_record.copy()
-            # 
-            # # 更新商家信息 - 添加(补)标记
-            # if predicted_seller != first_seller:
-            #     estimated_record['seller'] = f"{predicted_seller}(补)"
-            # else:
-            #     estimated_record['seller'] = f"{first_seller}(补)"
-            # estimated_record['seller_change_probability'] = change_prob
-            # 
-            # # 基于新商家的估算逻辑
-            # if predicted_seller != first_seller:
-            #     # 如果预测商家变化，使用新商家的历史数据
-            #     seller_historical_data = get_seller_historical_data(
-            #         df, predicted_seller, unique_id, date, days=7
-            #     )
-            #     estimation_method = f'seller_changed({change_prob:.2f})'
-            # else:
-            #     # 如果商家不变，使用原商家数据
-            #     seller_historical_data = get_seller_historical_data(
-            #         df, first_seller, unique_id, date, days=7
-            #     )
-            #     estimation_method = f'seller_same({change_prob:.2f})'
-            # 
-            # # 库存估算逻辑
-            # seller_inventory_trend = estimate_seller_inventory_trend(
-            #     seller_historical_data, predicted_seller
-            # )
-            # seller_price_impact = estimate_seller_price_strategy(
-            #     seller_historical_data, predicted_seller, original_record['price']
-            # )
-            # 
-            # # 商家变化对库存的影响
-            # if predicted_seller != first_seller:
-            #     # 新商家可能有不同的库存策略
-            #     change_impact = -2 if change_prob > 0.6 else -1  # 商家变化通常意味着库存减少
-            # else:
-            #     change_impact = 0
-            # 
-            # # 综合估算
-            # estimated_quantity = (
-            #     original_record['quantity'] + 
-            #     seller_inventory_trend + 
-            #     seller_price_impact + 
-            #     change_impact
-            # )
-            # estimated_quantity = max(0, int(estimated_quantity))
-            # 
-            # # 更新估算记录
-            # estimated_record['quantity'] = estimated_quantity
-            # estimated_record['is_estimated'] = True
-            # estimated_record['estimation_method'] = estimation_method
-            # estimated_record['date_add_to_bag'] = original_record['date_add_to_bag'] + timedelta(hours=2)
-            # 
-            # processed_records.append(estimated_record)
-            # estimated_records.append(estimated_record)
-            # ========== 估算逻辑注释结束 ==========
-            
-        else:
-            # 如果有多条记录，取第一条和最后一条
-            first_record = group_sorted.iloc[0].copy()
-            last_record = group_sorted.iloc[-1].copy()
-            
-            # 添加标注字段
-            first_record['is_estimated'] = False
-            first_record['estimation_method'] = 'original'
-            last_record['is_estimated'] = False
-            last_record['estimation_method'] = 'original'
-            
-            processed_records.append(first_record)
-            processed_records.append(last_record)
-    
-    # 创建新的DataFrame，保留所有原始列
-    result_df = pd.DataFrame(processed_records)
-    # result_df['storage'] = result_df['storage'].str.replace('GB', '').str.replace('Go', '').astype(str)
-    
-    # 重置索引
-    result_df = result_df.reset_index(drop=True)
-    
-    return result_df
-
-# def main():
-#     """主函数：完整的数据处理和导出流程"""
-#     print("开始数据处理...")
-    
-#     # 1. 读取和预处理数据
-#     print("\n1. 读取和预处理数据")
-#     df = prepare_data()
-#     print(f"原始数据条数: {len(df)}")
-    
-#     # 2. 处理每日唯一记录（带估算和标注）
-#     print("\n2. 处理每日唯一记录")
-#     processed_df, estimated_records = process_unique_records_per_day_with_seller_focus(df)
-#     print(f"处理后数据条数: {len(processed_df)}")
-#     print(f"新增估算记录条数: {len(estimated_records)}")
-    
-#     # 3. 价格验证
-#     print("\n3. 进行价格验证")
-#     validated_df = validate_price_by_grade(processed_df)
-#     print(f"验证后数据条数: {len(validated_df)}")
-    
-#     # 4. 修复时区问题 - 在导出前移除时区信息
-#     print("\n4. 修复时区问题")
-#     if 'date_add_to_bag' in validated_df.columns:
-#         validated_df['date_add_to_bag'] = validated_df['date_add_to_bag'].dt.tz_localize(None)
-    
-#     # 5. 导出到Excel
-#     print("\n5. 导出数据到Excel")
-#     output_filename = f"processed_inventory_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    
-#     with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
-#         # 导出完整处理后的数据
-#         validated_df.to_excel(writer, sheet_name='完整数据', index=False)
-        
-#         # 导出仅新增的估算记录
-#         if estimated_records:
-#             estimated_df = pd.DataFrame(estimated_records)
-#             # 同样修复估算记录的时区问题
-#             if 'date_add_to_bag' in estimated_df.columns:
-#                 estimated_df['date_add_to_bag'] = estimated_df['date_add_to_bag'].dt.tz_localize(None)
-#             estimated_df.to_excel(writer, sheet_name='新增估算记录', index=False)
-        
-#         # 导出统计摘要
-#         summary_data = {
-#             '统计项目': [
-#                 '原始数据条数',
-#                 '处理后数据条数', 
-#                 '新增估算记录条数',
-#                 '价格验证后数据条数',
-#                 '最终数据条数'
-#             ],
-#             '数量': [
-#                 len(df),
-#                 len(processed_df),
-#                 len(estimated_records),
-#                 len(validated_df),
-#                 len(validated_df)
-#             ]
-#         }
-#         summary_df = pd.DataFrame(summary_data)
-#         summary_df.to_excel(writer, sheet_name='统计摘要', index=False)
-    
-#     print(f"\n数据处理完成！")
-#     print(f"输出文件: {output_filename}")
-#     print(f"新增估算记录条数: {len(estimated_records)}")
-    
-    # return validated_df
-    # return validated_df, estimated_records
-
-
-
-def get_complete_dataframe():
-    """
-    返回包含原始数据和估算数据的完整DataFrame，供app.py使用
-    """
-    # 1. 基础数据预处理
-    df = prepare_data()
-    
-    # 2. 处理每日唯一记录（带估算）
-    processed_df = process_unique_records_per_day_with_seller_focus(df)  # 只接收一个返回值
-    
-    # 3. 价格验证
-    validated_df = validate_price_by_grade(processed_df)
-    
-    # 4. 修复时区问题
-    if 'date_add_to_bag' in validated_df.columns:
-        validated_df['date_add_to_bag'] = validated_df['date_add_to_bag'].dt.tz_localize(None)
-    
-    # 统计估算记录数量
-    estimated_count = len(validated_df[validated_df.get('is_estimated', False) == True])
-    
-    print(f"完整数据集包含 {len(validated_df)} 条记录")
-    print(f"其中估算记录 {estimated_count} 条")
-    
-    return validated_df
-
-def export_all_processed_data():
-    """导出所有处理后的数据到processed_data文件夹"""
-    # 创建输出文件夹
-    output_dir = "e:\\项目\\app\\processed_data"
-    os.makedirs(output_dir, exist_ok=True)
-    
-    print("开始处理所有数据...")
-    
-    # 1. 处理原始数据
-    print("\n1. 处理原始数据")
-    df = prepare_data()
-    processed_df = process_unique_records_per_day_with_seller_focus(df)
-    validated_df = validate_price_by_grade(processed_df)
-    
-    # 修复时区问题
-    if 'date_add_to_bag' in validated_df.columns:
-        validated_df['date_add_to_bag'] = validated_df['date_add_to_bag'].dt.tz_localize(None)
-    
-    # 2. 处理Excel数据
-    print("\n2. 处理Excel数据")
+    # 加载Excel数据
     xq_data, ljh_data = load_excel_data()
     
     # 处理内存列
@@ -726,301 +95,1334 @@ def export_all_processed_data():
     if not ljh_data.empty:
         ljh_data = process_memory_column(ljh_data)
     
-    # 3. 生成库存和价格数据
-    print("\n3. 生成库存和价格数据")
-    color_inventory_df, total_inventory_df = create_daily_color_inventory_data(validated_df)
-    daily_price_df = create_daily_price_data(validated_df)
+    # 原有数据预处理
+    df = df.copy()
     
-    # 4. 生成统一筛选选项
-    print("\n4. 生成统一筛选选项")
-    filter_options = generate_unified_filter_options(validated_df, xq_data, ljh_data)
+    # 将所有筛选字段转换为字符串，避免类型混合问题
+    filter_columns = ['model', 'grade_name', 'battery', 'storage', 'sim_type', 'local']
+    for col in filter_columns:
+        if col in df.columns:
+            df[col] = df[col].astype(str)
     
-    # 5. 导出所有数据
-    print("\n5. 导出数据到文件")
+    # 确保price是数值类型
+    df['price'] = pd.to_numeric(df['price'], errors='coerce')
     
-    # 导出原始数据处理结果
-    validated_df.to_excel(os.path.join(output_dir, "original_data.xlsx"), index=False)
+    # 确保date列存在且格式正确
+    if 'date' not in df.columns:
+        df['date'] = df['date_add_to_bag'].dt.date
     
-    # 导出Excel数据
-    with pd.ExcelWriter(os.path.join(output_dir, "excel_data.xlsx"), engine='openpyxl') as writer:
+    # 移除空值
+    df = df.dropna(subset=['price'])
+    
+    if df.empty:
+        print("原有数据为空，无法创建应用")
+        return None
+    
+    # 获取原有数据筛选选项
+    grade_options = [{'label': '全部', 'value': '全部'}] + [{'label': grade, 'value': grade} for grade in sorted(df['grade_name'].unique())]
+    battery_options = [{'label': '全部', 'value': '全部'}] + [{'label': battery, 'value': battery} for battery in sorted(df['battery'].unique())]
+    local_options = [{'label': '全部', 'value': '全部'}] + [{'label': local, 'value': local} for local in sorted(df['local'].unique())]
+    
+    # 统一的筛选选项生成函数
+    def get_unified_options():
+        # 统一的型号选项（合并所有数据源）
+        all_models = set()
+        if not df.empty:
+            all_models.update(df['model'].dropna().unique())
         if not xq_data.empty:
-            xq_data.to_excel(writer, sheet_name='讯强全新机', index=False)
+            all_models.update(xq_data['型号'].dropna().unique())
         if not ljh_data.empty:
-            ljh_data.to_excel(writer, sheet_name='靓机汇二手回收', index=False)
+            all_models.update(ljh_data['型号'].dropna().unique())
+        
+        unified_model_options = [{'label': '全部', 'value': '全部'}] + \
+                               [{'label': model, 'value': model} for model in sorted(all_models)]
+        
+        # 统一的内存选项（强制转换为int类型）
+        all_memory = set()
+        
+        # 处理原始数据的storage字段
+        if not df.empty:
+            for storage in df['storage'].dropna():
+                try:
+                    # 提取数字部分并转换为int
+                    memory_str = str(storage).replace('G', '').replace('g', '').strip()
+                    if memory_str.isdigit():
+                        all_memory.add(int(memory_str))
+                except:
+                    continue
+        
+        # 处理讯强数据的内存字段
+        if not xq_data.empty:
+            for memory in xq_data['内存'].dropna():
+                try:
+                    # 处理纳米：将"纳米"替换为"1"
+                    memory_str = str(memory).replace('纳米', '1').replace('G', '').replace('g', '').strip()
+                    memory_int = int(float(memory_str))
+                    all_memory.add(memory_int)
+                except:
+                    continue
+        
+        # 处理靓机汇数据的内存字段
+        if not ljh_data.empty:
+            for memory in ljh_data['内存'].dropna():
+                try:
+                    # 处理纳米：将"纳米"替换为"1"
+                    memory_str = str(memory).replace('纳米', '1').replace('G', '').replace('g', '').strip()
+                    memory_int = int(float(memory_str))
+                    all_memory.add(memory_int)
+                except:
+                    continue
+        
+        # 创建内存选项（纯数字，按大小排序）
+        unified_memory_options = [{'label': '全部', 'value': '全部'}] + \
+                                [{'label': str(mem), 'value': str(mem)} for mem in sorted(all_memory)]
+        
+        # 统一的SIM类型选项（合并所有数据源）
+        all_sim_types = set()
+        if not df.empty:
+            all_sim_types.update(df['sim_type'].dropna().unique())
+        if not xq_data.empty:
+            all_sim_types.update(xq_data['版本'].dropna().unique())
+        if not ljh_data.empty:
+            all_sim_types.update(ljh_data['版本'].dropna().unique())
+        
+        unified_sim_options = [{'label': '全部', 'value': '全部'}] + \
+                             [{'label': sim_type, 'value': sim_type} for sim_type in sorted(all_sim_types)]
+        
+        return unified_model_options, unified_memory_options, unified_sim_options
     
-    # 导出库存数据
-    with pd.ExcelWriter(os.path.join(output_dir, "daily_inventory_data.xlsx"), engine='openpyxl') as writer:
-        color_inventory_df.to_excel(writer, sheet_name='颜色库存', index=False)
-        total_inventory_df.to_excel(writer, sheet_name='总库存', index=False)
+    # 获取统一的筛选选项
+    unified_model_options, unified_memory_options, unified_sim_options = get_unified_options()
     
-    # 导出价格数据
-    daily_price_df.to_excel(os.path.join(output_dir, "daily_price_data.xlsx"), index=False)
+    # 创建Dash应用
+    app = dash.Dash(__name__, suppress_callback_exceptions=True)
     
-    # 导出筛选选项
-    with open(os.path.join(output_dir, "unified_filter_options.json"), 'w', encoding='utf-8') as f:
-        json.dump(filter_options, f, ensure_ascii=False, indent=2)
+    # 定义应用布局
+    app.layout = html.Div([
+        html.H1("数据分析系统", style={'textAlign': 'center', 'marginBottom': 30}),
+        
+        # 标签页选择器
+        dcc.Tabs(id='main-tabs', value='original-analysis', children=[
+            dcc.Tab(label='每日颜色库存分析', value='original-analysis'),
+            dcc.Tab(label='讯强全新机分析', value='xq-analysis'),
+            dcc.Tab(label='靓机汇二手回收分析', value='ljh-analysis'),
+            dcc.Tab(label='iPad箱型图分析', value='ipad-analysis'),  # 新增Tab
+        ], style={'marginBottom': 20}),
+        
+        # 动态筛选控件区域
+        html.Div(
+            id='filter-controls',
+            children=[]  # 确保有初始的children属性
+        ),
+        
+        # 图表显示区域
+        html.Div(id='chart-content'),
+        
+        # 虚拟输出元素（隐藏）
+        html.Div(id='dummy-output', style={'display': 'none'})
+    ])
     
-    print(f"\n数据处理完成！")
-    print(f"输出文件夹: {output_dir}")
-    print(f"原始数据: {len(validated_df)} 条")
-    print(f"讯强数据: {len(xq_data)} 条")
-    print(f"靓机汇数据: {len(ljh_data)} 条")
-    print(f"颜色库存数据: {len(color_inventory_df)} 条")
-    print(f"价格数据: {len(daily_price_df)} 条")
-    
-    return output_dir
-
-def create_daily_color_inventory_data(df):
-    """创建每日颜色库存数据"""
-    # 创建unique_key
-    df['unique_key'] = (
-        df['model'].astype(str) + '_' +
-        df['grade_name'].astype(str) + '_' +
-        df['battery'].astype(str) + '_' +
-        df['storage'].astype(str) + '_' +
-        df['sim_type'].astype(str) + '_' +
-        df['local'].astype(str) + '_' +
-        df['color'].astype(str)
+    # 筛选控件回调，保持状态
+    @app.callback(
+        Output('filter-controls', 'children'),
+        [Input('main-tabs', 'value')]
     )
-    
-    # 按日期分组处理库存数据
-    daily_color_inventory = []
-    daily_total_inventory = []
-    
-    for date in sorted(df['date'].unique()):
-        date_data = df[df['date'] == date].copy()
+    def update_filter_controls(selected_tab):
+        # 使用全局状态保持所有筛选器值
+        model_value = GLOBAL_FILTER_STATE['model']
+        memory_value = GLOBAL_FILTER_STATE['memory']
+        sim_value = GLOBAL_FILTER_STATE['sim_type']
+        grade_value = GLOBAL_FILTER_STATE['grade']  # 从全局状态获取
+        battery_value = GLOBAL_FILTER_STATE['battery']  # 从全局状态获取
+        local_value = GLOBAL_FILTER_STATE['local']  # 从全局状态获取
         
-        if len(date_data) == 0:
-            continue
-        
-        # 按unique_key分组
-        grouped = date_data.groupby('unique_key')
-        
-        daily_first_color = {}
-        daily_last_color = {}
-        daily_first_sellers = {}  
-        daily_last_sellers = {}   
-        daily_first_prices = {}   
-        daily_last_prices = {}    
-        daily_first_total = 0
-        daily_last_total = 0
-        
-        for unique_key, group in grouped:
-            group = group.sort_values('date_add_to_bag')
-            color = group['color'].iloc[0]
-            
-            # 获取seller和价格信息
-            first_seller = group['seller'].iloc[0] if 'seller' in group.columns else '未知'
-            last_seller = group['seller'].iloc[-1] if 'seller' in group.columns else '未知'
-            first_price = group['price'].iloc[0] if 'price' in group.columns else 0
-            last_price = group['price'].iloc[-1] if 'price' in group.columns else 0
-            
-            # 使用quantity列或记录数
-            if 'quantity' in group.columns:
-                first_inventory = pd.to_numeric(group['quantity'].iloc[0], errors='coerce')
-                last_inventory = pd.to_numeric(group['quantity'].iloc[-1], errors='coerce')
+        # 统一的筛选器布局（所有模块都使用相同的字段）
+        common_filters = html.Div([
+            html.Div([
+                html.Div([
+                    html.Label("型号:"),
+                    dcc.Dropdown(
+                        id='unified-model-dropdown',
+                        options=unified_model_options,
+                        value=model_value,
+                        style={'width': '200px'}
+                    )
+                ], style={'display': 'inline-block', 'marginRight': 20}),
                 
-                if pd.isna(first_inventory):
-                    first_inventory = 1
-                if pd.isna(last_inventory):
-                    last_inventory = len(group)
-            else:
-                first_inventory = 1
-                last_inventory = len(group)
-            
-            # 累加颜色库存
-            daily_first_color[color] = daily_first_color.get(color, 0) + first_inventory
-            daily_last_color[color] = daily_last_color.get(color, 0) + last_inventory
-            
-            # 收集seller信息
-            if color not in daily_first_sellers:
-                daily_first_sellers[color] = []
-            if color not in daily_last_sellers:
-                daily_last_sellers[color] = []
-            
-            daily_first_sellers[color].append(first_seller)
-            daily_last_sellers[color].append(last_seller)
-            
-            # 收集价格信息
-            if color not in daily_first_prices:
-                daily_first_prices[color] = []
-            if color not in daily_last_prices:
-                daily_last_prices[color] = []
-            
-            daily_first_prices[color].append(first_price)
-            daily_last_prices[color].append(last_price)
-            
-            # 累加总库存
-            daily_first_total += first_inventory
-            daily_last_total += last_inventory
+                html.Div([
+                    html.Label("内存:"),
+                    dcc.Dropdown(
+                        id='unified-memory-dropdown',
+                        options=unified_memory_options,
+                        value=memory_value,
+                        style={'width': '200px'}
+                    )
+                ], style={'display': 'inline-block', 'marginRight': 20}),
+                
+                html.Div([
+                    html.Label("SIM类型:"),
+                    dcc.Dropdown(
+                        id='unified-sim-dropdown',
+                        options=unified_sim_options,
+                        value=sim_value,
+                        style={'width': '200px'}
+                    )
+                ], style={'display': 'inline-block', 'marginRight': 20}),
+            ], style={'marginBottom': 20, 'textAlign': 'center'}),
+        ])
         
-        # 记录每个颜色的库存和seller信息
-        for color in set(list(daily_first_color.keys()) + list(daily_last_color.keys())):
-            # 处理seller信息，去重并合并
-            first_sellers_list = list(set(daily_first_sellers.get(color, [])))
-            last_sellers_list = list(set(daily_last_sellers.get(color, [])))
+        # 额外筛选器（始终创建，但根据标签页显示/隐藏）
+        additional_filters_style = {'marginBottom': 30, 'textAlign': 'center'} if selected_tab == 'original-analysis' else {'display': 'none'}
+        
+        additional_filters = html.Div([
+            html.Div([
+                html.Label("磨损:"),
+                dcc.Dropdown(
+                    id='grade-dropdown',
+                    options=grade_options,
+                    value=grade_value,
+                    style={'width': '200px'}
+                )
+            ], style={'display': 'inline-block', 'marginRight': 20}),
             
-            # 计算平均价格
-            first_prices_list = daily_first_prices.get(color, [])
-            last_prices_list = daily_last_prices.get(color, [])
-            first_avg_price = sum(first_prices_list) / len(first_prices_list) if first_prices_list else 0
-            last_avg_price = sum(last_prices_list) / len(last_prices_list) if last_prices_list else 0
+            html.Div([
+                html.Label("电池:"),
+                dcc.Dropdown(
+                    id='battery-dropdown',
+                    options=battery_options,
+                    value=battery_value,
+                    style={'width': '200px'}
+                )
+            ], style={'display': 'inline-block', 'marginRight': 20}),
             
-            daily_color_inventory.append({
-                'date': pd.to_datetime(date),
-                'color': color,
-                'first_inventory': daily_first_color.get(color, 0),
-                'last_inventory': daily_last_color.get(color, 0),
-                'first_sellers': ', '.join(first_sellers_list),
-                'last_sellers': ', '.join(last_sellers_list),
-                'first_avg_price': first_avg_price,
-                'last_avg_price': last_avg_price
+            html.Div([
+                html.Label("地区:"),
+                dcc.Dropdown(
+                    id='local-dropdown',
+                    options=local_options,
+                    value=local_value,
+                    style={'width': '200px'}
+                )
+            ], style={'display': 'inline-block', 'marginRight': 20}),
+        ], style=additional_filters_style)
+        
+        # iPad箱型图分析Tab也用同样的筛选器（不包含颜色）
+        if selected_tab == 'ipad-analysis':
+            # 获取iPad数据，以便提取国家和磨损选项
+            ipad_df = load_ipad_data()
+            print("\n=== iPad筛选器选项生成 ===")
+            
+            # 国家选项
+            country_options = [{'label': '全部', 'value': '全部'}]
+            if not ipad_df.empty and '国家' in ipad_df.columns:
+                country_options += [
+                    {'label': str(x), 'value': str(x)} for x in sorted(ipad_df['国家'].dropna().unique())
+                ]
+            print(f"国家选项: {[opt['value'] for opt in country_options]}")
+            
+            # 磨损选项
+            grade_options_ipad = [{'label': '全部', 'value': '全部'}]
+            if not ipad_df.empty and '磨损中文' in ipad_df.columns:
+                grade_options_ipad += [
+                    {'label': str(x), 'value': str(x)} for x in sorted(ipad_df['磨损中文'].dropna().unique())
+                ]
+            print(f"磨损选项: {[opt['value'] for opt in grade_options_ipad]}")
+            
+            # 第一行：型号、内存、SIM类型
+            first_row = html.Div([
+                html.Label("型号:"),
+                dcc.Dropdown(
+                    id='unified-model-dropdown',
+                    options=unified_model_options,
+                    value=model_value,
+                    style={'width': '200px', 'display': 'inline-block', 'marginRight': '20px'}
+                ),
+                html.Label("内存:"),
+                dcc.Dropdown(
+                    id='unified-memory-dropdown',
+                    options=unified_memory_options,
+                    value=memory_value,
+                    style={'width': '200px', 'display': 'inline-block', 'marginRight': '20px'}
+                ),
+                html.Label("SIM类型:"),
+                dcc.Dropdown(
+                    id='unified-sim-dropdown',
+                    options=unified_sim_options,
+                    value=sim_value,
+                    style={'width': '200px', 'display': 'inline-block'}
+                ),
+            ], style={'textAlign': 'center', 'marginBottom': 10})
+            # 第二行：磨损、国家
+            second_row = html.Div([
+                html.Label("磨损:"),
+                dcc.Dropdown(
+                    id='ipad-grade-dropdown',
+                    options=grade_options_ipad,
+                    value='全部',
+                    style={'width': '200px', 'display': 'inline-block', 'marginRight': '20px'}
+                ),
+                html.Label("国家:"),
+                dcc.Dropdown(
+                    id='country-dropdown',
+                    options=country_options,
+                    value='全部',
+                    style={'width': '200px', 'display': 'inline-block'}
+                ),
+            ], style={'textAlign': 'center', 'marginBottom': 10, 'display': 'flex', 'justifyContent': 'center', 'gap': '20px'})
+            return html.Div([first_row, second_row])
+        return html.Div([common_filters, additional_filters])
+    
+
+    
+    # 统一的筛选器状态更新回调（包含所有筛选器）
+    @app.callback(
+        Output('dummy-output', 'children', allow_duplicate=True),
+        [Input('unified-model-dropdown', 'value'),
+         Input('unified-memory-dropdown', 'value'),
+         Input('unified-sim-dropdown', 'value')],
+        [State('ipad-grade-dropdown', 'value'),
+         State('country-dropdown', 'value')],
+        prevent_initial_call=True
+    )
+    def update_all_filter_state(model_val, memory_val, sim_val, grade_val, country_val):
+        # 更新全局筛选器状态
+        if model_val is not None:
+            GLOBAL_FILTER_STATE['model'] = model_val
+        if memory_val is not None:
+            GLOBAL_FILTER_STATE['memory'] = memory_val
+        if sim_val is not None:
+            GLOBAL_FILTER_STATE['sim_type'] = sim_val
+        if grade_val is not None:
+            GLOBAL_FILTER_STATE['grade'] = grade_val
+        if country_val is not None:
+            GLOBAL_FILTER_STATE['local'] = country_val  # 用country_val更新local状态
+        return ''
+    
+    # 第一个回调：处理original-analysis标签页（包含所有筛选器）
+    @app.callback(
+        Output('chart-content', 'children'),
+        [Input('main-tabs', 'value'),
+         Input('unified-model-dropdown', 'value'),
+         Input('unified-memory-dropdown', 'value'),
+         Input('unified-sim-dropdown', 'value'),
+         Input('grade-dropdown', 'value'),
+         Input('battery-dropdown', 'value'),
+         Input('local-dropdown', 'value')],
+        prevent_initial_call=False
+    )
+    def update_original_analysis_chart(selected_tab, model_val, memory_val, sim_val, grade_val, battery_val, local_val):
+        # 只处理 original-analysis 标签页
+        if selected_tab != 'original-analysis':
+            raise PreventUpdate
+        
+        # 设置默认值
+        model_val = model_val or '全部'
+        memory_val = memory_val or '全部'
+        sim_val = sim_val or '全部'
+        grade_val = grade_val or '全部'
+        battery_val = battery_val or '全部'
+        local_val = local_val or '全部'
+        
+        try:
+            # 筛选原始数据
+            filtered_df = df.copy()
+            
+            if model_val != '全部':
+                filtered_df = filtered_df[filtered_df['model'] == model_val]
+            if memory_val != '全部':
+                def match_memory(storage_val):
+                    try:
+                        storage_int = int(str(storage_val).replace('G', '').replace('g', '').strip())
+                        return storage_int == int(memory_val)
+                    except:
+                        return False
+                filtered_df = filtered_df[filtered_df['storage'].apply(match_memory)]
+            if sim_val != '全部':
+                filtered_df = filtered_df[filtered_df['sim_type'] == sim_val]
+            if grade_val != '全部':
+                filtered_df = filtered_df[filtered_df['grade_name'] == grade_val]
+            if battery_val != '全部':
+                filtered_df = filtered_df[filtered_df['battery'] == battery_val]
+            if local_val != '全部':
+                filtered_df = filtered_df[filtered_df['local'] == local_val]
+            
+            return dcc.Graph(figure=create_daily_color_analysis_chart(filtered_df))
+        
+        except Exception as e:
+            print(f"原始分析图表更新错误: {e}")
+            return dcc.Graph(figure=create_daily_color_analysis_chart(df))
+    
+    # 第二个回调：处理其他标签页（只使用基础筛选器）
+    @app.callback(
+        Output('chart-content', 'children', allow_duplicate=True),
+        [Input('main-tabs', 'value'),
+         Input('unified-model-dropdown', 'value'),
+         Input('unified-memory-dropdown', 'value'),
+         Input('unified-sim-dropdown', 'value')],
+        prevent_initial_call=True
+    )
+    def update_other_tabs_chart(selected_tab, model_val, memory_val, sim_val):
+        # 只处理其他标签页
+        if selected_tab == 'original-analysis':
+            raise PreventUpdate
+        
+        # 设置默认值
+        model_val = model_val or '全部'
+        memory_val = memory_val or '全部'
+        sim_val = sim_val or '全部'
+        
+        try:
+            if selected_tab == 'xq-analysis':
+                # 筛选讯强数据
+                filtered_data = xq_data.copy()
+                
+                if model_val != '全部':
+                    filtered_data = filtered_data[filtered_data['型号'] == model_val]
+                if memory_val != '全部':
+                    def match_xq_memory(mem_val):
+                        try:
+                            mem_str = str(mem_val).replace('纳米', '1').replace('G', '').replace('g', '').strip()
+                            mem_int = int(float(mem_str))
+                            return mem_int == int(memory_val)
+                        except:
+                            return False
+                    filtered_data = filtered_data[filtered_data['内存'].apply(match_xq_memory)]
+                if sim_val != '全部':
+                    filtered_data = filtered_data[filtered_data['版本'] == sim_val]
+                
+                # 返回两个图表：箱型图和颜色价格折线图
+                return html.Div([
+                    html.H3("价格分布箱型图", style={'textAlign': 'center', 'marginTop': 20}),
+                    dcc.Graph(figure=create_xq_analysis_chart(filtered_data)),
+                    html.H3("各颜色价格趋势", style={'textAlign': 'center', 'marginTop': 30}),
+                    dcc.Graph(figure=create_xq_color_price_chart(filtered_data))
+                ])
+            
+            elif selected_tab == 'ljh-analysis':
+                # 筛选靓机汇数据
+                filtered_data = ljh_data.copy()
+                
+                if model_val != '全部':
+                    filtered_data = filtered_data[filtered_data['型号'] == model_val]
+                if memory_val != '全部':
+                    def match_ljh_memory(mem_val):
+                        try:
+                            mem_str = str(mem_val).replace('纳米', '1').replace('G', '').replace('g', '').strip()
+                            mem_int = int(float(mem_str))
+                            return mem_int == int(memory_val)
+                        except:
+                            return False
+                    filtered_data = filtered_data[filtered_data['内存'].apply(match_ljh_memory)]
+                if sim_val != '全部':
+                    filtered_data = filtered_data[filtered_data['版本'] == sim_val]
+                
+                return dcc.Graph(figure=create_ljh_analysis_chart(filtered_data))
+        
+        except Exception as e:
+            print(f"其他分析图表更新错误: {e}")
+            if selected_tab == 'xq-analysis':
+                return html.Div([
+                    dcc.Graph(figure=create_xq_analysis_chart(xq_data)),
+                    dcc.Graph(figure=create_xq_color_price_chart(xq_data))
+                ])
+            elif selected_tab == 'ljh-analysis':
+                return dcc.Graph(figure=create_ljh_analysis_chart(ljh_data))
+        
+        # 默认返回空图表
+        return dcc.Graph(figure=go.Figure())
+    
+    @app.callback(
+        Output('chart-content', 'children', allow_duplicate=True),
+        [
+            Input('main-tabs', 'value'),
+            Input('unified-model-dropdown', 'value'),
+            Input('unified-memory-dropdown', 'value'),
+            Input('unified-sim-dropdown', 'value'),
+            Input('ipad-grade-dropdown', 'value'),
+            Input('country-dropdown', 'value')
+        ],
+        prevent_initial_call=True
+    )
+    def update_ipad_box_chart(selected_tab, model_val, memory_val, sim_val, grade_val, country_val):
+        if selected_tab != 'ipad-analysis':
+            raise PreventUpdate
+        print("\n=== iPad箱型图分析调试 ===")
+        print("筛选参数：")
+        print(f"型号: {model_val}")
+        print(f"内存: {memory_val}")
+        print(f"SIM类型: {sim_val}")
+        print(f"磨损: {grade_val}")
+        print(f"国家: {country_val}")
+        
+        df = load_ipad_data()
+        print(f"\n初始数据行数: {len(df)}")
+        
+        if model_val and model_val != '全部':
+            df = df[df['标题'] == model_val]
+            print(f"型号筛选后行数: {len(df)}")
+        
+        if grade_val and grade_val != '全部':
+            print(f"磨损唯一值: {df['磨损中文'].unique()}")
+            df = df[df['磨损中文'].astype(str) == str(grade_val)]
+            print(f"磨损筛选后行数: {len(df)}")
+        
+        if memory_val and memory_val != '全部':
+            try:
+                df = df[df['容量'] == int(memory_val)]
+            except Exception:
+                df = df[df['容量'] == memory_val]
+            print(f"内存筛选后行数: {len(df)}")
+        
+        if sim_val and sim_val != '全部':
+            df = df[df['wifi类型'] == sim_val]
+            print(f"SIM类型筛选后行数: {len(df)}")
+        
+        if country_val and country_val != '全部':
+            df = df[df['国家'] == country_val]
+            print(f"国家筛选后行数: {len(df)}")
+        
+        print(f"\n最终数据行数: {len(df)}")
+        if df.empty:
+            print("警告：筛选后数据为空！")
+            return html.Div("无数据")
+            
+        fig = plot_ipad_box(df)
+        return dcc.Graph(figure=fig)
+    
+    def create_xq_analysis_chart(filtered_data):
+        """创建讯强全新机箱型图分析"""
+        if filtered_data.empty:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="筛选后数据为空",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                showarrow=False, font=dict(size=20)
+            )
+            return fig
+        
+        # 确保日期列格式正确
+        filtered_data['日期'] = pd.to_datetime(filtered_data['日期'], errors='coerce')
+        filtered_data = filtered_data.dropna(subset=['日期'])
+        
+        # 获取数值列（假设第5列开始是价格数据）
+        price_columns = filtered_data.columns[4:]  # 从第5列开始
+        
+        # 只保留有数据的日期，且格式为月-日
+        date_list = sorted(filtered_data['日期'].dt.strftime('%m-%d').unique())
+        
+        # 按日期分组，收集每日所有价格数据（忽略颜色）
+        daily_price_data = []
+        all_prices_for_range = []  # 用于计算价格范围
+        
+        for date_str in date_list:
+            date_data = filtered_data[filtered_data['日期'].dt.strftime('%m-%d') == date_str]
+            # 收集当天所有价格数据
+            all_prices = []
+            if len(date_data) > 0:
+                for col in price_columns:
+                    prices = pd.to_numeric(date_data[col], errors='coerce').dropna()
+                    # 添加价格验证，过滤异常值
+                    valid_prices = prices[(prices > 0) & (prices < 10000)]  # 假设合理价格范围是0-10000
+                    all_prices.extend(valid_prices.tolist())
+            daily_price_data.append({
+                'date': date_str,
+                'prices': all_prices if all_prices else []
             })
+            if all_prices:
+                all_prices_for_range.extend(all_prices)
         
-        # 记录总库存
-        daily_total_inventory.append({
-            'date': pd.to_datetime(date),
-            'first_total': daily_first_total,
-            'last_total': daily_last_total
-        })
-    
-    # 转换为DataFrame
-    color_inventory_df = pd.DataFrame(daily_color_inventory)
-    total_inventory_df = pd.DataFrame(daily_total_inventory)
-    
-    return color_inventory_df, total_inventory_df
-
-
-def create_daily_price_data(df):
-    """创建每日价格数据（K线图用）"""
-    daily_price_data = [] 
-    
-    for date in sorted(df['date'].unique()): 
-        date_data = df[df['date'] == date].copy() 
+        if not all_prices_for_range:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="没有足够的数据生成图表",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                showarrow=False, font=dict(size=20)
+            )
+            return fig
         
-        if len(date_data) == 0: 
-            continue 
+        # 创建箱型图
+        fig = go.Figure()
         
-        # 按颜色分组，取每种颜色的第一次和最后一次价格 
-        color_groups = date_data.groupby('color') 
-        first_prices = []  # 存储每种颜色第一次出现的价格 
-        last_prices = []   # 存储每种颜色最后一次出现的价格 
-        all_prices = []    # 存储所有价格用于计算最高最低价 
+        for day_data in daily_price_data:
+            if day_data['prices']:  # 有数据的日期
+                
+                # 计算统计信息
+                prices = day_data['prices']
+                min_price = min(prices)
+                max_price = max(prices)
+                median_price = sorted(prices)[len(prices)//2] if len(prices) % 2 == 1 else (sorted(prices)[len(prices)//2-1] + sorted(prices)[len(prices)//2]) / 2
+                
+                # 添加箱型图
+                fig.add_trace(go.Box(
+                    x=[day_data['date']] * len(day_data['prices']),
+                    y=day_data['prices'],
+                    name=day_data['date'],
+                    boxpoints='outliers',
+                    jitter=0.3,
+                    pointpos=-1.8,
+                    hovertemplate=(
+                        "日期: %{x}<br>"
+                        "最大值: %{q3}<br>"
+                        "上四分位数: %{q3}<br>"
+                        "中位数: %{median}<br>"
+                        "下四分位数: %{q1}<br>"
+                        "最小值: %{lowerfence}<br>"
+                        "数据点数: %{customdata}<br>"
+                        "<extra></extra>"
+                    ),
+                    customdata=[len(day_data['prices'])]
+                ))
+                
+                # 如果所有价格相同，添加一个透明的散点图来提供hover
+                if min_price == max_price:
+                    fig.add_trace(go.Scatter(
+                        x=[day_data['date']],
+                        y=[min_price],
+                        mode='markers',
+                        marker=dict(size=15, opacity=0, color='rgba(0,0,0,0)'),  # 使用rgba透明色
+                        name=day_data['date'] + '_hover',
+                        showlegend=False,
+                        hovertemplate=(
+                            "日期: %{x}<br>"
+                            "价格: " + str(min_price) + "<br>"
+                            "数据点数: " + str(len(prices)) + "<br>"
+                            "<extra></extra>"
+                        )
+                    ))
+            else:  # 没有数据的日期，添加空的占位符
+                fig.add_trace(go.Scatter(
+                    x=[day_data['date']],
+                    y=[None],
+                    mode='markers',
+                    marker=dict(size=0, opacity=0),
+                    name=day_data['date'],
+                    showlegend=False,
+                    hovertemplate="日期: %{x}<br>无数据<extra></extra>"
+                ))
         
-        for color, group in color_groups: 
-            group_sorted = group.sort_values('date_add_to_bag') 
-            group_prices = group_sorted['price'].dropna() 
+        # 计算价格范围和y轴刻度
+        if all_prices_for_range:
+            min_price = min(all_prices_for_range)
+            max_price = max(all_prices_for_range)
+            price_range = max_price - min_price
             
-            if len(group_prices) > 0: 
-                first_prices.append(group_prices.iloc[0])  # 第一次出现 
-                last_prices.append(group_prices.iloc[-1])  # 最后一次出现 
-                all_prices.extend(group_prices.tolist()) 
+            # 添加范围检查，防止内存溢出
+            if price_range > 50000:  # 如果价格范围过大，使用简化的刻度
+                tick_vals = None
+                y_min = None
+                y_max = None
+            else:
+                # 设置合适的间隔，确保整数显示
+                if price_range <= 100:
+                    tick_interval = 10
+                elif price_range <= 500:
+                    tick_interval = 50
+                elif price_range <= 1000:
+                    tick_interval = 100
+                elif price_range <= 5000:
+                    tick_interval = 500
+                else:
+                    tick_interval = 1000
+                
+                # 计算y轴范围
+                y_min = int(min_price // tick_interval) * tick_interval
+                y_max = int((max_price // tick_interval) + 1) * tick_interval
+                
+                # 添加额外检查，确保刻度数量合理
+                tick_count = (y_max - y_min) // tick_interval
+                if tick_count > 1000:  # 如果刻度数量过多，使用自动刻度
+                    tick_vals = None
+                    y_min = None
+                    y_max = None
+                else:
+                    # 生成刻度值
+                    tick_vals = list(range(y_min, y_max + tick_interval, tick_interval))
+        else:
+            tick_vals = None
+            y_min = None
+            y_max = None
         
-        if len(first_prices) == 0 or len(last_prices) == 0: 
-            continue 
+        fig.update_layout(
+            title='讯强全新机每日价格箱型图分析',
+            xaxis_title='日期',
+            yaxis_title='价格',
+            height=400,
+            showlegend=False,
+            xaxis=dict(
+                    type='category',
+                    categoryorder='category ascending'
+                ),
+            yaxis=dict(
+                tickvals=tick_vals,
+                ticktext=[str(int(val)) for val in tick_vals] if tick_vals else None,
+                range=[y_min, y_max] if y_min is not None and y_max is not None else None
+            )
+        )
         
-        # 计算中位数 
-        first_median = pd.Series(first_prices).median()  # 所有颜色第一次价格的中位数 
-        second_median = pd.Series(last_prices).median()  # 所有颜色最后一次价格的中位数 
+        return fig
+
+    def create_xq_color_price_chart(filtered_data):
+        """创建讯强全新机各颜色价格折线图"""
+        if filtered_data.empty:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="筛选后数据为空",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                showarrow=False, font=dict(size=20)
+            )
+            return fig
         
-        daily_price_data.append({ 
-            'date': pd.to_datetime(date), 
-            'first_median': first_median, 
-            'second_median': second_median, 
-            'open': first_median, 
-            'close': second_median, 
-            'high': max(all_prices) if all_prices else first_median, 
-            'low': min(all_prices) if all_prices else first_median 
-        }) 
-    
-    return pd.DataFrame(daily_price_data)
+        # 确保日期列格式正确
+        filtered_data['日期'] = pd.to_datetime(filtered_data['日期'], errors='coerce')
+        filtered_data = filtered_data.dropna(subset=['日期'])
+        
+        # 获取第四列作为颜色分组依据
+        color_column = filtered_data.columns[3]  # 第四列（索引为3）
+        
+        # 确保价格列为数值类型
+        price_column = filtered_data.columns[4]  # 第五列是价格
+        filtered_data[price_column] = pd.to_numeric(filtered_data[price_column], errors='coerce')
+        
+        # 过滤有效价格数据
+        valid_data = filtered_data[
+            (filtered_data[price_column] > 0) & 
+            (filtered_data[price_column] < 20000) & 
+            (filtered_data[price_column].notna())
+        ]
+        
+        if valid_data.empty:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="没有有效的价格数据",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                showarrow=False, font=dict(size=20)
+            )
+            return fig
+        
+        # 创建图表
+        fig = go.Figure()
+        
+        # 定义颜色映射
+        color_palette = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
+                        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+        
+        # 获取第四列的所有唯一值作为分组依据
+        unique_colors = valid_data[color_column].unique()
+        
+        # 为每个颜色创建一条线
+        for i, color_name in enumerate(unique_colors):
+            # 获取该颜色的所有数据
+            color_data = valid_data[valid_data[color_column] == color_name].copy()
+            
+            if len(color_data) > 0:
+                # 按日期排序
+                color_data = color_data.sort_values('日期')
+                
+                # 转换日期为字符串格式
+                date_strings = color_data['日期'].dt.strftime('%m-%d').tolist()
+                
+                # 添加线条
+                fig.add_trace(go.Scatter(
+                    x=date_strings,
+                    y=color_data[price_column],
+                    mode='lines+markers',
+                    name=str(color_name),
+                    line=dict(color=color_palette[i % len(color_palette)], width=2),
+                    marker=dict(size=4),
+                    connectgaps=True,
+                    hovertemplate=(
+                        f"{color_column}: %{{fullData.name}}<br>"
+                        "日期: %{x}<br>"
+                        "价格: ¥%{y:.0f}<br>"
+                        "<extra></extra>"
+                    )
+                ))
+        
+        fig.update_layout(
+            title='讯强全新机各颜色价格趋势',
+            xaxis_title='日期',
+            yaxis_title='价格 (¥)',
+            height=400,
+            hovermode='x unified',
+            xaxis=dict(
+                type='category',
+                categoryorder='category ascending'
+            ),
+            yaxis=dict(
+                tickformat=',.0f'
+            ),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        return fig
 
+    def create_ljh_analysis_chart(filtered_data):
+        """创建靓机汇二手回收分析图表（第5-9列折线图）"""
+        if filtered_data.empty:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="筛选后数据为空",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                showarrow=False, font=dict(size=20)
+            )
+            return fig
+        
+        # 确保日期列格式正确
+        filtered_data['日期'] = pd.to_datetime(filtered_data['日期'], errors='coerce')
+        filtered_data = filtered_data.dropna(subset=['日期'])
+        
+        # 获取第5-9列
+        line_columns = filtered_data.columns[4:9]  # 第5-9列
+        
+        # 创建图表
+        fig = go.Figure()
+        
+        # 收集所有数值用于计算y轴范围
+        all_values = []
+        
+        # 只保留有数据的日期，且格式为月-日
+        date_list_unique = sorted(filtered_data['日期'].dt.strftime('%m-%d').unique())
+        
+        # 为每一列创建一条线
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+        
+        for i, col in enumerate(line_columns):
+            if col in filtered_data.columns:
+                # 按日期分组，计算每日平均值
+                daily_avg = []
+                date_list = []
+                for date_str in date_list_unique:
+                    date_data = filtered_data[filtered_data['日期'].dt.strftime('%m-%d') == date_str]
+                    if len(date_data) > 0:
+                        avg_val = pd.to_numeric(date_data[col], errors='coerce').mean()
+                        if pd.notna(avg_val):
+                            daily_avg.append(avg_val)
+                            date_list.append(date_str)
+                            all_values.append(avg_val)
+                        else:
+                            daily_avg.append(None)
+                            date_list.append(date_str)
+                    else:
+                        daily_avg.append(None)
+                        date_list.append(date_str)
+                fig.add_trace(go.Scatter(
+                    x=date_list,
+                    y=daily_avg,
+                    mode='lines+markers',
+                    name=col,
+                    line=dict(color=colors[i % len(colors)]),
+                    connectgaps=True,  # 连接间隙
+                    hovertemplate=(
+                        "日期: %{x}<br>"
+                        "指标: " + col + "<br>"
+                        "数值: %{y}<br>"
+                        "<extra></extra>"
+                    )
+                ))
+        
+        # 计算价格范围和y轴刻度
+        if all_values:
+            min_val = min(all_values)
+            max_val = max(all_values)
+            val_range = max_val - min_val
+            
+            # 设置合适的间隔，确保整数显示
+            if val_range <= 100:
+                tick_interval = 10
+            elif val_range <= 500:
+                tick_interval = 50
+            elif val_range <= 1000:
+                tick_interval = 100
+            elif val_range <= 5000:
+                tick_interval = 500
+            else:
+                tick_interval = 1000
+            
+            # 计算y轴范围
+            y_min = int(min_val // tick_interval) * tick_interval
+            y_max = int((max_val // tick_interval) + 1) * tick_interval
+            
+            # 生成刻度值
+            tick_vals = list(range(y_min, y_max + tick_interval, tick_interval))
+        else:
+            tick_vals = None
+            y_min = None
+            y_max = None
+        
+        fig.update_layout(
+            title='靓机汇二手回收分析（第5-9列折线图）',
+            xaxis_title='日期',
+            yaxis_title='价格',
+            height=400,
+            showlegend=True,
+            xaxis=dict(
+                    type='category',
+                    categoryorder='category ascending'
+                ),
+            yaxis=dict(
+                tickvals=tick_vals,
+                ticktext=[str(int(val)) for val in tick_vals] if tick_vals else None,
+                range=[y_min, y_max] if y_min is not None and y_max is not None else None
+            )
+        )
+        
+        return fig
 
-def generate_unified_filter_options(df, xq_data, ljh_data):
-    """生成统一的筛选选项"""
-    # 统一的型号选项（合并所有数据源）
-    all_models = set()
-    if not df.empty:
-        all_models.update(df['model'].dropna().unique())
-    if not xq_data.empty:
-        all_models.update(xq_data['型号'].dropna().unique())
-    if not ljh_data.empty:
-        all_models.update(ljh_data['型号'].dropna().unique())
+    def create_daily_color_analysis_chart(filtered_df):
+        """创建每日颜色库存分析图表"""
+        try:
+            # 检查必需的列是否存在
+            required_columns = ['model', 'grade_name', 'battery', 'storage', 'sim_type', 'local', 'color', 'date', 'date_add_to_bag']
+            missing_columns = [col for col in required_columns if col not in filtered_df.columns]
+            
+            if missing_columns:
+                fig = go.Figure()
+                fig.add_annotation(
+                    text=f"数据缺少必需的列: {', '.join(missing_columns)}",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                    showarrow=False, font=dict(size=20)
+                )
+                return fig
+            
+            # 检查数据是否为空
+            if filtered_df.empty:
+                fig = go.Figure()
+                fig.add_annotation(
+                    text="筛选后数据为空",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                    showarrow=False, font=dict(size=20)
+                )
+                return fig
+            
+            # 数据预处理
+            df_copy = filtered_df.copy()
+            
+            # 确保筛选列的数据类型正确
+            filter_columns = ['model', 'grade_name', 'battery', 'storage', 'sim_type', 'local']
+            for col in filter_columns:
+                if col in df_copy.columns:
+                    df_copy[col] = df_copy[col].astype(str)
+            
+            # 确保price列是数值类型
+            df_copy['price'] = pd.to_numeric(df_copy['price'], errors='coerce')
+            
+            # 处理日期列
+            df_copy['date'] = pd.to_datetime(df_copy['date'], errors='coerce')
+            
+            # 移除NaN值
+            df_copy = df_copy.dropna(subset=['date', 'price'])
+            
+            if df_copy.empty:
+                fig = go.Figure()
+                fig.add_annotation(
+                    text="处理后数据为空",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                    showarrow=False, font=dict(size=20)
+                )
+                return fig
+            
+            # ===== K线图数据处理（修改为按颜色分组）===== 
+            daily_price_data = [] 
+            date_list = [pd.to_datetime(date).strftime('%Y-%m-%d') for date in df_copy['date'].dt.date.unique()]
+            date_ticktext = [pd.to_datetime(date).strftime('%m-%d') for date in df_copy['date'].dt.date.unique()]
+            for date in df_copy['date'].dt.date.unique(): 
+                date_data = df_copy[df_copy['date'].dt.date == date].copy() 
+                if len(date_data) == 0: 
+                    continue 
+                # 按颜色分组，取每种颜色的第一次和最后一次价格 
+                color_groups = date_data.groupby('color') 
+                first_prices = []  # 存储每种颜色第一次出现的价格 
+                last_prices = []   # 存储每种颜色最后一次出现的价格 
+                all_prices = []    # 存储所有价格用于计算最高最低价 
+                for color, group in color_groups: 
+                    group_sorted = group.sort_values('date_add_to_bag') 
+                    group_prices = group_sorted['price'].dropna() 
+                    if len(group_prices) > 0: 
+                        first_prices.append(group_prices.iloc[0])  # 第一次出现 
+                        last_prices.append(group_prices.iloc[-1])  # 最后一次出现 
+                        all_prices.extend(group_prices.tolist()) 
+                if len(first_prices) == 0 or len(last_prices) == 0: 
+                    continue 
+                # 计算中位数 
+                first_median = pd.Series(first_prices).median()  # 所有颜色第一次价格的中位数 
+                second_median = pd.Series(last_prices).median()  # 所有颜色最后一次价格的中位数 
+                daily_price_data.append({ 
+                    'date': pd.to_datetime(date).strftime('%Y-%m-%d'), 
+                    'first_median': first_median, 
+                    'second_median': second_median, 
+                    'open': first_median, 
+                    'close': second_median, 
+                    'high': max(all_prices) if all_prices else first_median, 
+                    'low': min(all_prices) if all_prices else first_median 
+                }) 
+            daily_df = pd.DataFrame(daily_price_data)
+            # ===== 库存数据处理（修改为包含seller信息）=====
+            # 创建unique_key
+            df_copy['unique_key'] = (
+                df_copy['model'].astype(str) + '_'+ df_copy['grade_name'].astype(str) + '_' + df_copy['battery'].astype(str) + '_' + df_copy['storage'].astype(str) + '_' + df_copy['sim_type'].astype(str) + '_' + df_copy['local'].astype(str) + '_' + df_copy['color'].astype(str)
+            )
+            # 按日期分组处理库存数据
+            daily_color_inventory = []
+            daily_total_inventory = []
+            for date in df_copy['date'].dt.date.unique():
+                date_data = df_copy[df_copy['date'].dt.date == date].copy()
+                if len(date_data) == 0:
+                    continue
+                grouped = date_data.groupby('unique_key')
+                daily_first_color = {}
+                daily_last_color = {}
+                daily_first_sellers = {}
+                daily_last_sellers = {}
+                daily_first_prices = {}
+                daily_last_prices = {}
+                daily_first_total = 0
+                daily_last_total = 0
+                for unique_key, group in grouped:
+                    group = group.sort_values('date_add_to_bag')
+                    color = group['color'].iloc[0]
+                    first_seller = group['seller'].iloc[0] if 'seller' in group.columns else '未知'
+                    last_seller = group['seller'].iloc[-1] if 'seller' in group.columns else '未知'
+                    first_price = group['price'].iloc[0] if 'price' in group.columns else 0
+                    last_price = group['price'].iloc[-1] if 'price' in group.columns else 0
+                    if 'quantity' in group.columns:
+                        first_inventory = pd.to_numeric(group['quantity'].iloc[0], errors='coerce')
+                        last_inventory = pd.to_numeric(group['quantity'].iloc[-1], errors='coerce')
+                        if pd.isna(first_inventory):
+                            first_inventory = 1
+                        if pd.isna(last_inventory):
+                            last_inventory = len(group)
+                    else:
+                        first_inventory = 1
+                        last_inventory = len(group)
+                    daily_first_color[color] = daily_first_color.get(color, 0) + first_inventory
+                    daily_last_color[color] = daily_last_color.get(color, 0) + last_inventory
+                    if color not in daily_first_sellers:
+                        daily_first_sellers[color] = []
+                    if color not in daily_last_sellers:
+                        daily_last_sellers[color] = []
+                    daily_first_sellers[color].append(first_seller)
+                    daily_last_sellers[color].append(last_seller)
+                    if color not in daily_first_prices:
+                        daily_first_prices[color] = []
+                    if color not in daily_last_prices:
+                        daily_last_prices[color] = []
+                    daily_first_prices[color].append(first_price)
+                    daily_last_prices[color].append(last_price)
+                    daily_first_total += first_inventory
+                    daily_last_total += last_inventory
+                for color in set(list(daily_first_color.keys()) + list(daily_last_color.keys())):
+                    first_sellers_list = list(set(daily_first_sellers.get(color, [])))
+                    last_sellers_list = list(set(daily_last_sellers.get(color, [])))
+                    first_prices_list = daily_first_prices.get(color, [])
+                    last_prices_list = daily_last_prices.get(color, [])
+                    first_avg_price = sum(first_prices_list) / len(first_prices_list) if first_prices_list else 0
+                    last_avg_price = sum(last_prices_list) / len(last_prices_list) if last_prices_list else 0
+                    daily_color_inventory.append({
+                        'date': pd.to_datetime(date).strftime('%Y-%m-%d'),
+                        'color': color,
+                        'first_inventory': daily_first_color.get(color, 0),
+                        'last_inventory': daily_last_color.get(color, 0),
+                        'first_sellers': ', '.join(first_sellers_list),
+                        'last_sellers': ', '.join(last_sellers_list),
+                        'first_avg_price': first_avg_price,
+                        'last_avg_price': last_avg_price
+                    })
+                daily_total_inventory.append({
+                    'date': pd.to_datetime(date).strftime('%Y-%m-%d'),
+                    'first_total': daily_first_total,
+                    'last_total': daily_last_total
+                })
+            color_inventory_df = pd.DataFrame(daily_color_inventory)
+            total_inventory_df = pd.DataFrame(daily_total_inventory)
+            if not color_inventory_df.empty:
+                first_color_df = color_inventory_df[['date', 'color', 'first_inventory', 'first_sellers', 'first_avg_price']].rename(columns={'first_inventory': 'inventory', 'first_sellers': 'sellers', 'first_avg_price': 'price'})
+                last_color_df = color_inventory_df[['date', 'color', 'last_inventory', 'last_sellers', 'last_avg_price']].rename(columns={'last_inventory': 'inventory', 'last_sellers': 'sellers', 'last_avg_price': 'price'})
+            else:
+                first_color_df = pd.DataFrame()
+                last_color_df = pd.DataFrame()
+            if not total_inventory_df.empty:
+                first_total_df = total_inventory_df[['date', 'first_total']].rename(columns={'first_total': 'total_inventory'})
+                last_total_df = total_inventory_df[['date', 'last_total']].rename(columns={'last_total': 'total_inventory'})
+            else:
+                first_total_df = pd.DataFrame()
+                last_total_df = pd.DataFrame()
+            # ===== 创建五子图布局 =====
+            fig = make_subplots(
+                rows=5, cols=1,
+                shared_xaxes=False,
+                vertical_spacing=0.08,
+                subplot_titles=('价格K线图',
+                               '每天每个颜色的库存数量（第一次出现）',
+                               '每天每个颜色的库存数量（最后一次出现）',
+                               '每天第一次出现的总库存（不区分颜色）',
+                               '每天最后一次出现的总库存（不区分颜色）'),
+                row_heights=[0.25, 0.2, 0.2, 0.175, 0.175]
+            )
+            
+            # ===== 第一图：K线图（与create_interactive_price_chart完全一样） =====
+            if not daily_df.empty:
+                fig.add_trace(
+                    go.Candlestick(
+                        x=daily_df['date'],
+                        open=daily_df['open'],
+                        high=daily_df['high'],
+                        low=daily_df['low'],
+                        close=daily_df['close'],
+                        name='价格',
+                        text=[f"日期: {date}<br>第一次中位数: {first:.2f}€<br>第二次中位数: {second:.2f}€<br>最高价: {high:.2f}€<br>最低价: {low:.2f}€"
+                              if not pd.isna(first) else f"日期: {date}<br>无数据"
+                              for date, first, second, high, low in zip(
+                                  daily_df['date'], daily_df['first_median'],
+                                  daily_df['second_median'], daily_df['high'], daily_df['low']
+                              )],
+                        hoverinfo='text'
+                    ),
+                    row=1, col=1
+                )
+            
+            # ===== 第二图：每天每个颜色的库存数量（第一次出现）- 同一天的颜色靠在一起 =====
+            if not first_color_df.empty:
+                # 为不同颜色分配颜色
+                colors_list = sorted(first_color_df['color'].unique())
+                colors_map = px.colors.qualitative.Set3[:len(colors_list)]
+                if len(colors_list) > len(colors_map):
+                    colors_map = colors_map * (len(colors_list) // len(colors_map) + 1)
+                color_mapping = dict(zip(colors_list, colors_map))
+                
+                # 重新组织数据，让同一天的颜色靠在一起
+                for color in colors_list:
+                    color_data = first_color_df[first_color_df['color'] == color]
+                    if not color_data.empty:
+                        # 准备customdata，包含商家和价格信息
+                        custom_data = []
+                        for _, row in color_data.iterrows():
+                            sellers = row['sellers']
+                            price = row['price']  # 直接使用price字段
+                            custom_data.append([sellers, price])
+                        
+                        fig.add_trace(
+                            go.Bar(
+                                x=color_data['date'],  # 直接使用日期作为x轴
+                                y=color_data['inventory'],
+                                name=f'第一次-{color}',
+                                marker_color=color_mapping[color],
+                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<br>价格: %{{customdata[1]:.2f}}€<br>商家: %{{customdata[0]}}<extra></extra>',
+                                customdata=custom_data,  # 传递商家和价格信息
+                                offsetgroup=color,  # 使用offsetgroup让同一天的不同颜色靠在一起
+                                legendgroup=f'first_{color}'
+                            ),
+                            row=2, col=1
+                        )
+            
+            # ===== 第三图：每天每个颜色的库存数量（最后一次出现）- 同一天的颜色靠在一起 =====
+            if not last_color_df.empty:
+                # 为不同颜色分配颜色
+                colors_list = sorted(last_color_df['color'].unique())
+                colors_map = px.colors.qualitative.Set3[:len(colors_list)]
+                if len(colors_list) > len(colors_map):
+                    colors_map = colors_map * (len(colors_list) // len(colors_map) + 1)
+                color_mapping = dict(zip(colors_list, colors_map))
+                
+                # 重新组织数据，让同一天的颜色靠在一起
+                for color in colors_list:
+                    color_data = last_color_df[last_color_df['color'] == color]
+                    if not color_data.empty:
+                        # 准备customdata，包含商家和价格信息
+                        custom_data = []
+                        for _, row in color_data.iterrows():
+                            sellers = row['sellers']
+                            price = row['price']  # 直接使用price字段
+                            custom_data.append([sellers, price])
+                        
+                        fig.add_trace(
+                            go.Bar(
+                                x=color_data['date'],  # 直接使用日期作为x轴
+                                y=color_data['inventory'],
+                                name=f'最后一次-{color}',
+                                marker_color=color_mapping[color],
+                                hovertemplate=f'颜色: {color}<br>日期: %{{x}}<br>库存数量: %{{y}}<br>价格: %{{customdata[1]:.2f}}€<br>商家: %{{customdata[0]}}<extra></extra>',
+                                customdata=custom_data,  # 传递商家和价格信息
+                                offsetgroup=color,  # 使用offsetgroup让同一天的不同颜色靠在一起
+                                legendgroup=f'last_{color}'
+                            ),
+                            row=3, col=1
+                        )
+            
+            # ===== 第四图：每天第一次出现的总库存 =====
+            if not first_total_df.empty:
+                fig.add_trace(
+                    go.Bar(
+                        x=first_total_df['date'],
+                        y=first_total_df['total_inventory'],
+                        name='第一次总库存',
+                        marker_color='skyblue',
+                        hovertemplate='日期: %{x}<br>总库存数量: %{y}<extra></extra>'
+                    ),
+                    row=4, col=1
+                )
+            
+            # ===== 第五图：每天最后一次出现的总库存 =====
+            if not last_total_df.empty:
+                fig.add_trace(
+                    go.Bar(
+                        x=last_total_df['date'],
+                        y=last_total_df['total_inventory'],
+                        name='最后一次总库存',
+                        marker_color='lightcoral',
+                        hovertemplate='日期: %{x}<br>总库存数量: %{y}<extra></extra>'
+                    ),
+                    row=5, col=1
+                )
+            
+            # ===== 更新布局 =====
+            fig.update_layout(
+                title=f'交互式价格和库存分析图表（五子图版本）',
+                height=1600,
+                width=1400,
+                showlegend=True,  # 显示图例以区分不同颜色
+                xaxis_rangeslider_visible=False,
+                barmode='group'  # 设置柱状图为分组模式，让同一天的不同颜色靠在一起
+            )
+            
+            # ===== 更新布局，xaxis加ticktext =====
+            fig.update_layout(
+                xaxis=dict(
+                    type='category',
+                    tickmode='array',
+                    tickvals=date_list,
+                    ticktext=date_ticktext,
+                    categoryorder='category ascending'
+                ),
+                xaxis2=dict(
+                    type='category',
+                    tickmode='array',
+                    tickvals=date_list,
+                    ticktext=date_ticktext,
+                    categoryorder='category ascending'
+                ),
+                xaxis3=dict(
+                    type='category',
+                    tickmode='array',
+                    tickvals=date_list,
+                    ticktext=date_ticktext,
+                    categoryorder='category ascending'
+                ),
+                xaxis4=dict(
+                    type='category',
+                    tickmode='array',
+                    tickvals=date_list,
+                    ticktext=date_ticktext,
+                    categoryorder='category ascending'
+                ),
+                xaxis5=dict(
+                    type='category',
+                    tickmode='array',
+                    tickvals=date_list,
+                    ticktext=date_ticktext,
+                    categoryorder='category ascending'
+                )
+            )
+            
+            return fig
+            
+        except Exception as e:
+            print(f"创建图表时出错: {str(e)}")
+            fig = go.Figure()
+            fig.add_annotation(
+                text=f"数据处理错误: {str(e)}",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, xanchor='center', yanchor='middle',
+                showarrow=False, font=dict(size=16)
+            )
+            return fig
     
-    unified_model_options = [{'label': '全部', 'value': '全部'}] + \
-                           [{'label': str(model), 'value': str(model)} for model in sorted(all_models)]
-    
-    # 统一的内存选项（强制转换为int类型）
-    all_memory = set()
-    
-    # 处理原始数据的storage字段
-    if not df.empty:
-        for storage in df['storage'].dropna():
-            try:
-                # 提取数字部分并转换为int
-                memory_str = str(storage).replace('G', '').replace('g', '').strip()
-                if memory_str.isdigit():
-                    all_memory.add(int(memory_str))
-            except:
-                continue
-    
-    # 处理讯强数据的内存字段
-    if not xq_data.empty:
-        for memory in xq_data['内存'].dropna():
-            try:
-                # 处理纳米：将"纳米"替换为"1"
-                memory_str = str(memory).replace('纳米', '1').replace('G', '').replace('g', '').strip()
-                memory_int = int(float(memory_str))
-                all_memory.add(memory_int)
-            except:
-                continue
-    
-    # 处理靓机汇数据的内存字段
-    if not ljh_data.empty:
-        for memory in ljh_data['内存'].dropna():
-            try:
-                # 处理纳米：将"纳米"替换为"1"
-                memory_str = str(memory).replace('纳米', '1').replace('G', '').replace('g', '').strip()
-                memory_int = int(float(memory_str))
-                all_memory.add(memory_int)
-            except:
-                continue
-    
-    # 创建内存选项（纯数字，按大小排序）
-    unified_memory_options = [{'label': '全部', 'value': '全部'}] + \
-                            [{'label': str(mem), 'value': str(mem)} for mem in sorted(all_memory)]
-    
-    # 统一的SIM类型选项（合并所有数据源）
-    all_sim_types = set()
-    if not df.empty:
-        all_sim_types.update(df['sim_type'].dropna().unique())
-    if not xq_data.empty:
-        all_sim_types.update(xq_data['版本'].dropna().unique())
-    if not ljh_data.empty:
-        all_sim_types.update(ljh_data['版本'].dropna().unique())
-    
-    unified_sim_options = [{'label': '全部', 'value': '全部'}] + \
-                         [{'label': str(sim_type), 'value': str(sim_type)} for sim_type in sorted(all_sim_types)]
-    
-    # 其他筛选选项（基于原始数据）- 转换为Python原生类型
-    grade_options = [{'label': '全部', 'value': '全部'}] + \
-                   [{'label': str(grade), 'value': str(grade)} for grade in sorted(df['grade_name'].dropna().unique().tolist())]
-    battery_options = [{'label': '全部', 'value': '全部'}] + \
-                     [{'label': str(battery), 'value': str(battery)} for battery in sorted(df['battery'].dropna().unique().tolist())]
-    local_options = [{'label': '全部', 'value': '全部'}] + \
-                   [{'label': str(local), 'value': str(local)} for local in sorted(df['local'].dropna().unique().tolist())]
-    
-    return {
-        'model_options': unified_model_options,
-        'memory_options': unified_memory_options,
-        'sim_options': unified_sim_options,
-        'grade_options': grade_options,
-        'battery_options': battery_options,
-        'local_options': local_options
-    }
+    def plot_ipad_box(df):
+        """
+        绘制iPad每日价格箱型图，鼠标悬停只显示最高、最低、均值、中位数。
+        """
+        if df.empty:
+            fig = go.Figure()
+            fig.add_annotation(text="无数据", xref="paper", yref="paper", x=0.5, y=0.5, xanchor='center', yanchor='middle', showarrow=False, font=dict(size=20))
+            return fig
 
-if __name__ == "__main__":
-    # 导出所有处理后的数据
-    export_all_processed_data()
+        df['date_str'] = df['日期'].dt.strftime('%m-%d')
+        date_list = sorted(df['date_str'].unique())
 
+        fig = go.Figure()
+        for date in date_list:
+            prices = df[df['date_str'] == date]['价格处理后（欧元）']
+            if len(prices) > 0:
+                max_val = prices.max()
+                min_val = prices.min()
+                median_val = prices.median()
+                mean_val = prices.mean()
+                # 1. 画箱型图，不显示hover
+                fig.add_trace(go.Box(
+                    x=[date]*len(prices),
+                    y=prices,
+                    name=date,
+                    boxpoints=False,
+                    hoverinfo='skip',  # 不显示默认hover
+                    marker=dict(color='lightblue')
+                ))
+                # 2. 画透明散点，hover显示自定义内容
+                fig.add_trace(go.Scatter(
+                    x=[date],
+                    y=[mean_val],
+                    mode='markers',
+                    marker=dict(size=18, color='rgba(0,0,0,0)'),
+                    showlegend=False,
+                    hovertemplate=(
+                        f'日期: {date}<br>'
+                        f'最高价: {max_val:.2f}€<br>'
+                        f'最低价: {min_val:.2f}€<br>'
+                        f'均值: {mean_val:.2f}€<br>'
+                        f'中位数: {median_val:.2f}€'
+                        '<extra></extra>'
+                    )
+                ))
+        fig.update_layout(
+            title='iPad每日价格箱型图',
+            xaxis_title='日期',
+            yaxis_title='价格（欧元）',
+            height=500,
+            showlegend=False,
+            xaxis=dict(
+                type='category',
+                categoryorder='category ascending',
+                tickangle=30  # 添加这一行，设置x轴标签旋转30度
+            ),
+            yaxis=dict(tickformat=',.0f')
+        )
+        return fig
+    
+    return app
 
+# 模块级别定义 app 和 server
+# 改为直接读取处理好的原始数据文件
+processed_df = pd.read_excel("./processed_data/original_data.xlsx")
+app = create_integrated_dash_app(processed_df)
+server = app.server if app is not None else None  # 暴露 server 给 Gunicorn
+
+if __name__ == '__main__':
+    if app is not None:
+        # 修改为适合Render部署的配置
+        port = int(os.environ.get('PORT', 8050))
+        app.run(host='0.0.0.0', port=port, debug=False)
+        print(f"\n集成应用已启动！请在浏览器中访问: http://0.0.0.0:{port}")
+    else:
+        print("应用创建失败，请检查数据")
