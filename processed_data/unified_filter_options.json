@@ -41,6 +41,10 @@
       "value": "全部"
     },
     {
+      "label": "1 Sim+E Sim",
+      "value": "1 Sim+E Sim"
+    },
+    {
       "label": "2 Psim",
       "value": "2 Psim"
     },
@@ -101,6 +105,46 @@
     {
       "label": "fr-fr",
       "value": "fr-fr"
+    }
+  ],
+  "wbsm_stock_options": [
+    {
+      "label": "全部",
+      "value": "全部"
+    },
+    {
+      "label": "不卖",
+      "value": "不卖"
+    },
+    {
+      "label": "有货可卖",
+      "value": "有货可卖"
+    },
+    {
+      "label": "缺货",
+      "value": "缺货"
+    }
+  ],
+  "wbsm_version_options": [
+    {
+      "label": "全部",
+      "value": "全部"
+    },
+    {
+      "label": "Asis",
+      "value": "Asis"
+    },
+    {
+      "label": "Asis+",
+      "value": "Asis+"
+    },
+    {
+      "label": "Brand new",
+      "value": "Brand new"
+    },
+    {
+      "label": "CPO",
+      "value": "CPO"
     }
   ]
 }
