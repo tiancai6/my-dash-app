@@ -185,9 +185,126 @@ def create_color_inventory_app(df):
         print("数据为空，无法创建应用")
         return None
 
-    # 使用统一的筛选选项
-    from 合并数据处理脚本 import generate_unified_filter_options
-    filter_options = generate_unified_filter_options(df, xq_data, ljh_data, wbsm_data)
+    # 直接在代码中生成筛选选项
+    def generate_local_filter_options(df, xq_data, ljh_data, wbsm_data):
+        """本地生成筛选选项，避免依赖外部脚本"""
+        # 型号选项
+        model_set = set()
+        if not df.empty and 'model' in df.columns:
+            model_set.update(df['model'].dropna().unique())
+        if not xq_data.empty and '型号' in xq_data.columns:
+            model_set.update(xq_data['型号'].dropna().unique())
+        if not ljh_data.empty and '型号' in ljh_data.columns:
+            model_set.update(ljh_data['型号'].dropna().unique())
+        if not wbsm_data.empty and 'model' in wbsm_data.columns:
+            model_set.update(wbsm_data['model'].dropna().unique())
+        
+        model_options = [{'label': '全部', 'value': '全部'}]
+        model_options.extend([{'label': model, 'value': model} for model in sorted(model_set) if model != '全部'])
+        
+        # 内存选项
+        memory_set = set()
+        if not df.empty and 'storage' in df.columns:
+            memory_set.update(df['storage'].dropna().unique())
+        if not xq_data.empty and '内存' in xq_data.columns:
+            memory_set.update(xq_data['内存'].dropna().unique())
+        if not ljh_data.empty and '内存' in ljh_data.columns:
+            memory_set.update(ljh_data['内存'].dropna().unique())
+        if not wbsm_data.empty and 'memory' in wbsm_data.columns:
+            memory_set.update(wbsm_data['memory'].dropna().unique())
+        
+        # 内存排序函数
+        def sort_memory(memory_str):
+            try:
+                if 'TB' in str(memory_str).upper():
+                    return float(str(memory_str).upper().replace('TB', '')) * 1024
+                elif 'GB' in str(memory_str).upper():
+                    return float(str(memory_str).upper().replace('GB', ''))
+                else:
+                    return float(str(memory_str))
+            except:
+                return 0
+        
+        memory_options = [{'label': '全部', 'value': '全部'}]
+        sorted_memories = sorted([m for m in memory_set if m != '全部'], key=sort_memory)
+        memory_options.extend([{'label': memory, 'value': memory} for memory in sorted_memories])
+        
+        # SIM类型选项
+        sim_set = set()
+        if not df.empty and 'sim_type' in df.columns:
+            sim_set.update(df['sim_type'].dropna().unique())
+        if not xq_data.empty and 'SIM类型' in xq_data.columns:
+            sim_set.update(xq_data['SIM类型'].dropna().unique())
+        if not ljh_data.empty and 'SIM类型' in ljh_data.columns:
+            sim_set.update(ljh_data['SIM类型'].dropna().unique())
+        if not wbsm_data.empty and 'spec' in wbsm_data.columns:
+            sim_set.update(wbsm_data['spec'].dropna().unique())
+        
+        sim_options = [{'label': '全部', 'value': '全部'}]
+        sim_options.extend([{'label': sim, 'value': sim} for sim in sorted(sim_set) if sim != '全部'])
+        
+        # 成色选项
+        grade_set = set()
+        if not df.empty and 'grade_name' in df.columns:
+            grade_set.update(df['grade_name'].dropna().unique())
+        if not xq_data.empty and '成色' in xq_data.columns:
+            grade_set.update(xq_data['成色'].dropna().unique())
+        if not ljh_data.empty and '成色' in ljh_data.columns:
+            grade_set.update(ljh_data['成色'].dropna().unique())
+        
+        grade_options = [{'label': '全部', 'value': '全部'}]
+        grade_options.extend([{'label': grade, 'value': grade} for grade in sorted(grade_set) if grade != '全部'])
+        
+        # 电池选项
+        battery_set = set()
+        if not df.empty and 'battery' in df.columns:
+            battery_set.update(df['battery'].dropna().unique())
+        if not xq_data.empty and '电池' in xq_data.columns:
+            battery_set.update(xq_data['电池'].dropna().unique())
+        if not ljh_data.empty and '电池' in ljh_data.columns:
+            battery_set.update(ljh_data['电池'].dropna().unique())
+        
+        battery_options = [{'label': '全部', 'value': '全部'}]
+        battery_options.extend([{'label': battery, 'value': battery} for battery in sorted(battery_set) if battery != '全部'])
+        
+        # 地区选项
+        local_set = set()
+        if not df.empty and 'local' in df.columns:
+            local_set.update(df['local'].dropna().unique())
+        if not xq_data.empty and '地区' in xq_data.columns:
+            local_set.update(xq_data['地区'].dropna().unique())
+        if not ljh_data.empty and '地区' in ljh_data.columns:
+            local_set.update(ljh_data['地区'].dropna().unique())
+        
+        local_options = [{'label': '全部', 'value': '全部'}]
+        local_options.extend([{'label': local, 'value': local} for local in sorted(local_set) if local != '全部'])
+        
+        # 五步数码缺货状态选项
+        wbsm_stock_options = [{'label': '全部', 'value': '全部'}]
+        if not wbsm_data.empty and 'out_of_stock' in wbsm_data.columns:
+            stock_values = wbsm_data['out_of_stock'].dropna().unique()
+            for stock in sorted(stock_values):
+                label = '缺货' if stock else '有货'
+                wbsm_stock_options.append({'label': label, 'value': stock})
+        
+        # 五步数码版本选项
+        wbsm_version_options = [{'label': '全部', 'value': '全部'}]
+        if not wbsm_data.empty and 'version' in wbsm_data.columns:
+            versions = wbsm_data['version'].dropna().unique()
+            wbsm_version_options.extend([{'label': version, 'value': version} for version in sorted(versions)])
+        
+        return {
+            'model_options': model_options,
+            'memory_options': memory_options,
+            'sim_options': sim_options,
+            'grade_options': grade_options,
+            'battery_options': battery_options,
+            'local_options': local_options,
+            'wbsm_stock_options': wbsm_stock_options,
+            'wbsm_version_options': wbsm_version_options
+        }
+    
+    filter_options = generate_local_filter_options(df, xq_data, ljh_data, wbsm_data)
     
     model_options = filter_options['model_options']
     memory_options = filter_options['memory_options']
