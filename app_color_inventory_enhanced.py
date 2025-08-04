@@ -100,23 +100,48 @@ def load_excel_data():
         if ljh_data.empty:
             print(f"未找到靓机汇数据工作表，尝试的名称: {ljh_sheet_names}")
         
-        print(f"总数据行数: {len(xq_data) + len(ljh_data)}")
+        # 初始化五步数码数据
+        wbsm_data = pd.DataFrame()
+        
+        # 尝试读取五步数码数据工作表
+        wbsm_sheet_names = ['五步数码16系列', '五步数码16系列', 'WBSM', '五步数码']
+        for sheet_name in wbsm_sheet_names:
+            if sheet_name in sheet_names:
+                try:
+                    wbsm_data = pd.read_excel(excel_file_path, sheet_name=sheet_name)
+                    print(f"成功读取五步数码数据工作表 '{sheet_name}': {len(wbsm_data)} 行")
+                    break
+                except Exception as e:
+                    print(f"读取工作表 '{sheet_name}' 失败: {e}")
+        
+        if wbsm_data.empty:
+            print(f"未找到五步数码数据工作表，尝试的名称: {wbsm_sheet_names}")
+        
+        print(f"总数据行数: {len(xq_data) + len(ljh_data) + len(wbsm_data)}")
         
         # 如果项目内文件读取失败，尝试外部文件
-        if xq_data.empty and ljh_data.empty:
+        if xq_data.empty and ljh_data.empty and wbsm_data.empty:
             print("项目内文件读取失败，尝试外部文件...")
             external_file_path = "E:\楚讯实业\iPhone 16系列所有数据汇总.xlsx"
             try:
                 if os.path.exists(external_file_path):
                     xq_data = pd.read_excel(external_file_path, sheet_name='全新机讯强')
                     ljh_data = pd.read_excel(external_file_path, sheet_name='靓机汇二手机')
-                    print(f"外部文件读取成功 - 讯强: {len(xq_data)}, 靓机汇: {len(ljh_data)}")
+                    # 尝试读取五步数码数据
+                    for sheet_name in wbsm_sheet_names:
+                        try:
+                            wbsm_data = pd.read_excel(external_file_path, sheet_name=sheet_name)
+                            print(f"外部文件读取五步数码成功: {len(wbsm_data)}")
+                            break
+                        except:
+                            continue
+                    print(f"外部文件读取成功 - 讯强: {len(xq_data)}, 靓机汇: {len(ljh_data)}, 五步数码: {len(wbsm_data)}")
                 else:
                     print(f"外部文件不存在: {external_file_path}")
             except Exception as e3:
                 print(f"外部文件也读取失败: {e3}")
         
-        return xq_data, ljh_data
+        return xq_data, ljh_data, wbsm_data
     except Exception as e:
         print(f"读取Excel文件失败: {e}")
         return pd.DataFrame(), pd.DataFrame()
@@ -135,10 +160,10 @@ def create_color_inventory_app(df):
     创建每日颜色库存分析的Dash应用，包含6个筛选器和4个子图。
     新增：最后一次出现的颜色库存数据子图，以及讯强和靓机汇走势图
     """
-    global xq_data, ljh_data
+    global xq_data, ljh_data, wbsm_data
     
     # 加载Excel数据
-    xq_data, ljh_data = load_excel_data()
+    xq_data, ljh_data, wbsm_data = load_excel_data()
     
     # 处理内存列
     if not xq_data.empty:
@@ -160,21 +185,18 @@ def create_color_inventory_app(df):
         print("数据为空，无法创建应用")
         return None
 
-    # 生成筛选选项
-    model_options = [{'label': '全部', 'value': '全部'}] + [{'label': m, 'value': m} for m in sorted(df['model'].unique())]
-    memory_set = set()
-    for storage in df['storage'].dropna():
-        try:
-            mem = str(storage).replace('G', '').replace('g', '').strip()
-            if mem.isdigit():
-                memory_set.add(int(mem))
-        except:
-            continue
-    memory_options = [{'label': '全部', 'value': '全部'}] + [{'label': str(m), 'value': str(m)} for m in sorted(memory_set)]
-    sim_options = [{'label': '全部', 'value': '全部'}] + [{'label': s, 'value': s} for s in sorted(df['sim_type'].unique())]
-    grade_options = [{'label': '全部', 'value': '全部'}] + [{'label': g, 'value': g} for g in sorted(df['grade_name'].unique())]
-    battery_options = [{'label': '全部', 'value': '全部'}] + [{'label': b, 'value': b} for b in sorted(df['battery'].unique())]
-    local_options = [{'label': '全部', 'value': '全部'}] + [{'label': l, 'value': l} for l in sorted(df['local'].unique())]
+    # 使用统一的筛选选项
+    from 合并数据处理脚本 import generate_unified_filter_options
+    filter_options = generate_unified_filter_options(df, xq_data, ljh_data, wbsm_data)
+    
+    model_options = filter_options['model_options']
+    memory_options = filter_options['memory_options']
+    sim_options = filter_options['sim_options']
+    grade_options = filter_options['grade_options']
+    battery_options = filter_options['battery_options']
+    local_options = filter_options['local_options']
+    wbsm_stock_options = filter_options['wbsm_stock_options']
+    wbsm_version_options = filter_options['wbsm_version_options']
 
     # Dash app
     app = dash.Dash(__name__, suppress_callback_exceptions=True)
@@ -246,11 +268,24 @@ def create_color_inventory_app(df):
             ], style={'display': 'inline-block'}),
         ], style={'textAlign': 'center', 'marginBottom': 20}),
         
+        # 第三行筛选器：五部数码专用筛选器（缺货状态）
+        html.Div([
+            html.Div([html.Label("是否缺货:"),
+                dcc.Dropdown(
+                    id='wbsm-stock-dropdown', 
+                    options=wbsm_stock_options, 
+                    value='全部', 
+                    style={'width': '180px'}
+                )
+            ], style={'display': 'inline-block'}),
+        ], style={'textAlign': 'center', 'marginBottom': 20}),
+        
         # 添加标签页
         dcc.Tabs(id='main-tabs', value='color-inventory', children=[
             dcc.Tab(label='颜色库存分析', value='color-inventory'),
             dcc.Tab(label='讯强走势图（2psim)', value='xq-analysis'),
-            dcc.Tab(label='靓机汇走势图（2psim)', value='ljh-analysis')
+            dcc.Tab(label='靓机汇走势图（2psim)', value='ljh-analysis'),
+            dcc.Tab(label='五步数码价格趋势', value='wbsm-analysis')
         ], style={'marginBottom': 20}),
         
         html.Div(id='chart-content')
@@ -265,14 +300,15 @@ def create_color_inventory_app(df):
             Input('sim-dropdown', 'value'),
             Input('grade-dropdown', 'value'),
             Input('battery-dropdown', 'value'),
-            Input('local-dropdown', 'value')
+            Input('local-dropdown', 'value'),
+            Input('wbsm-stock-dropdown', 'value')
         ]
     )
-    def update_chart_content(selected_tab, model_val, memory_val, sim_val, grade_val, battery_val, local_val):
-        global xq_data, ljh_data
+    def update_chart_content(selected_tab, model_val, memory_val, sim_val, grade_val, battery_val, local_val, wbsm_stock_val):
+        global xq_data, ljh_data, wbsm_data
         
         # 调试信息：检查全局变量状态
-        print(f"回调函数中 - xq_data行数: {len(xq_data)}, ljh_data行数: {len(ljh_data)}")
+        print(f"回调函数中 - xq_data行数: {len(xq_data)}, ljh_data行数: {len(ljh_data)}, wbsm_data行数: {len(wbsm_data)}")
         
         # 设置默认值
         model_val = model_val or '全部'
@@ -383,6 +419,57 @@ def create_color_inventory_app(df):
                     filtered_data = filtered_data[filtered_data['版本'] == sim_val]
                 
                 return dcc.Graph(figure=create_ljh_analysis_chart(filtered_data))
+            
+            elif selected_tab == 'wbsm-analysis':
+                # 五步数码价格趋势分析
+                if wbsm_data.empty:
+                    return html.Div([
+                        html.H3("五步数码价格趋势", style={'textAlign': 'center'}),
+                        html.Div([
+                            html.P("暂无五步数码数据", style={'textAlign': 'center', 'color': 'red', 'fontSize': '18px'}),
+                            html.P("可能的原因:", style={'textAlign': 'center', 'marginTop': '20px'}),
+                            html.Ul([
+                                html.Li("Excel文件中没有五步数码16系列工作表"),
+                                html.Li("工作表名称不匹配（需要名称: 五步数码16系列）"),
+                                html.Li("数据文件路径不正确")
+                            ], style={'textAlign': 'left', 'maxWidth': '500px', 'margin': '0 auto'}),
+                            html.P("请检查 ./processed_data/excel_data.xlsx 文件", 
+                                  style={'textAlign': 'center', 'marginTop': '20px', 'fontStyle': 'italic'})
+                        ], style={'padding': '40px'})
+                    ])
+                
+                filtered_data = wbsm_data.copy()
+                
+                if model_val != '全部':
+                    # 五步数码数据可能使用'型号'或'model'列
+                    if '型号' in filtered_data.columns:
+                        filtered_data = filtered_data[filtered_data['型号'] == model_val]
+                    elif 'model' in filtered_data.columns:
+                        filtered_data = filtered_data[filtered_data['model'] == model_val]
+                
+                if memory_val != '全部':
+                    def match_wbsm_memory(mem_val):
+                        try:
+                            mem_str = str(mem_val).replace('纳米', '1').replace('G', '').replace('g', '').strip()
+                            mem_int = int(float(mem_str))
+                            return mem_int == int(memory_val)
+                        except:
+                            return False
+                    if 'memory' in filtered_data.columns:
+                        filtered_data = filtered_data[filtered_data['memory'].apply(match_wbsm_memory)]
+                
+                if sim_val != '全部':
+                    # 五步数码数据可能使用'spec'列
+                    if 'spec' in filtered_data.columns:
+                        filtered_data = filtered_data[filtered_data['spec'] == sim_val]
+                
+                # 添加缺货状态筛选
+                if wbsm_stock_val != '全部' and '是否缺货' in filtered_data.columns:
+                    filtered_data = filtered_data[filtered_data['是否缺货'] == wbsm_stock_val]
+                
+                return dcc.Graph(figure=create_wbsm_analysis_chart(filtered_data))
+            
+
         
         except Exception as e:
             print(f"图表更新错误: {e}")
@@ -1070,7 +1157,200 @@ def create_color_inventory_app(df):
     
     return app
 
+def create_wbsm_analysis_chart(filtered_data):
+    """创建五步数码16系列分析图表（价格趋势图）"""
+    print(f"五步数码图表函数 - 输入数据行数: {len(filtered_data)}")
+    if not filtered_data.empty:
+        print(f"五步数码数据列名: {list(filtered_data.columns)}")
+        print(f"五步数码数据前5行:\n{filtered_data.head()}")
+    
+    if filtered_data.empty:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="筛选后数据为空",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, xanchor='center', yanchor='middle',
+            showarrow=False, font=dict(size=20)
+        )
+        return fig
+    
+    # 确保日期列格式正确
+    if '提取日期' in filtered_data.columns:
+        filtered_data['提取日期'] = pd.to_datetime(filtered_data['提取日期'], errors='coerce')
+        filtered_data = filtered_data.dropna(subset=['提取日期'])
+        date_column = '提取日期'
+    elif '最近更新时间' in filtered_data.columns:
+        filtered_data['最近更新时间'] = pd.to_datetime(filtered_data['最近更新时间'], errors='coerce')
+        filtered_data = filtered_data.dropna(subset=['最近更新时间'])
+        date_column = '最近更新时间'
+    else:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="未找到日期列",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, xanchor='center', yanchor='middle',
+            showarrow=False, font=dict(size=20)
+        )
+        return fig
+    
+    # 获取价格列
+    price_column = None
+    for col in ['新增列：统一成港币','新增列：统一成美元',  '价格', 'price', '售价', '报价']:
+        if col in filtered_data.columns:
+            # 检查是否有有效数据
+            valid_prices = pd.to_numeric(filtered_data[col], errors='coerce').dropna()
+            if len(valid_prices) > 0:
+                price_column = col
+                break
+    
+    if price_column is None:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="未找到有效价格数据",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, xanchor='center', yanchor='middle',
+            showarrow=False, font=dict(size=20)
+        )
+        return fig
+    
+    # 确保价格列是数值类型
+    filtered_data[price_column] = pd.to_numeric(filtered_data[price_column], errors='coerce')
+    valid_data = filtered_data.dropna(subset=[price_column])
+    
+    print(f"五步数码数据 - 使用日期列: {date_column}, 价格列: {price_column}, 有效数据行数: {len(valid_data)}")
+    
+    if valid_data.empty:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="无有效价格数据",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, xanchor='center', yanchor='middle',
+            showarrow=False, font=dict(size=20)
+        )
+        return fig
+    
+    # 创建图表
+    fig = go.Figure()
+    
+    # 按版本分组创建趋势线
+    if '版本' in valid_data.columns:
+        unique_versions = sorted(valid_data['版本'].dropna().unique())
+        print(f"五步数码数据中的版本: {list(unique_versions)}")
+        
+        # 为不同版本使用不同颜色
+        version_colors = {
+            'A版': '#1f77b4',    # 蓝色
+            'B版': '#ff7f0e',    # 橙色
+            'C版': '#2ca02c',    # 绿色
+            'D版': '#d62728',    # 红色
+            'E版': '#9467bd',    # 紫色
+            'F版': '#8c564b',    # 棕色
+            'G版': '#e377c2',    # 粉色
+            'H版': '#7f7f7f',    # 灰色
+            'I版': '#bcbd22',    # 黄绿色
+            'J版': '#17becf',    # 青色
+        }
+        
+        fallback_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+        
+        for i, version in enumerate(unique_versions):
+            version_data = valid_data[valid_data['版本'] == version]
+            
+            # 按日期分组，计算每日平均价格
+            daily_prices = version_data.groupby(version_data[date_column].dt.date)[price_column].mean().reset_index()
+            daily_prices[date_column] = pd.to_datetime(daily_prices[date_column])
+            daily_prices = daily_prices.sort_values(date_column)
+            
+            # 格式化日期为月-日
+            date_labels = daily_prices[date_column].dt.strftime('%m-%d')
+            
+            # 选择颜色
+            if version in version_colors:
+                color = version_colors[version]
+            else:
+                color = fallback_colors[i % len(fallback_colors)]
+            
+            # 添加趋势线
+            fig.add_trace(go.Scatter(
+                x=date_labels,
+                y=daily_prices[price_column],
+                mode='lines+markers',
+                name=version,
+                line=dict(color=color, width=2),
+                marker=dict(size=6),
+                connectgaps=True,
+                hovertemplate=(
+                    "日期: %{x}<br>"
+                    "版本: " + version + "<br>"
+                    "价格: %{y}<br>"
+                    "<extra></extra>"
+                )
+            ))
+    else:
+        # 如果没有memory列，按整体数据创建趋势线
+        daily_prices = valid_data.groupby(valid_data[date_column].dt.date)[price_column].mean().reset_index()
+        daily_prices[date_column] = pd.to_datetime(daily_prices[date_column])
+        daily_prices = daily_prices.sort_values(date_column)
+        
+        # 格式化日期为月-日
+        date_labels = daily_prices[date_column].dt.strftime('%m-%d')
+        
+        fig.add_trace(go.Scatter(
+            x=date_labels,
+            y=daily_prices[price_column],
+            mode='lines+markers',
+            name='五步数码价格趋势',
+            line=dict(color='#1f77b4', width=2),
+            marker=dict(size=6),
+            connectgaps=True,
+            hovertemplate=(
+                "日期: %{x}<br>"
+                "价格: %{y}<br>"
+                "<extra></extra>"
+            )
+        ))
+    
+    # 设置图表布局
+    fig.update_layout(
+        title=dict(
+            text='五步数码16系列价格趋势分析',
+            x=0.5,
+            font=dict(size=16, family='SimHei')
+        ),
+        xaxis=dict(
+            title='日期',
+            tickangle=45,
+            type='category'
+        ),
+        yaxis=dict(
+            title=f'{price_column}',
+            tickformat=',.0f'
+        ),
+        hovermode='x unified',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        margin=dict(l=50, r=50, t=80, b=50)
+    )
+    
+    return fig
+
+
+
 processed_df = load_processed_data()
+
+# 加载Excel数据并设置为全局变量
+try:
+    xq_data, ljh_data, wbsm_data = load_excel_data()
+    print(f"全局数据加载完成 - 讯强: {len(xq_data)}, 靓机汇: {len(ljh_data)}, 五步数码: {len(wbsm_data)}")
+except Exception as e:
+    print(f"加载Excel数据失败: {e}")
+    xq_data, ljh_data, wbsm_data = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
 app = create_color_inventory_app(processed_df)
 server = app.server if app is not None else None
 
