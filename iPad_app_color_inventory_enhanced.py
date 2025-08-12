@@ -111,6 +111,9 @@ def load_excel_data():
                 try:
                     wbsm_data = pd.read_excel(excel_file_path, sheet_name=sheet_name)
                     print(f"成功读取五步数码数据工作表 '{sheet_name}': {len(wbsm_data)} 行")
+                    print(f"五步数码数据列名: {list(wbsm_data.columns)}")
+                    if len(wbsm_data) > 0:
+                        print(f"五步数码数据前3行:\n{wbsm_data.head(3)}")
                     break
                 except Exception as e:
                     print(f"读取工作表 '{sheet_name}' 失败: {e}")
@@ -133,6 +136,9 @@ def load_excel_data():
                         try:
                             wbsm_data = pd.read_excel(external_file_path, sheet_name=sheet_name)
                             print(f"外部文件读取五步数码成功: {len(wbsm_data)}")
+                            print(f"外部文件五步数码数据列名: {list(wbsm_data.columns)}")
+                            if len(wbsm_data) > 0:
+                                print(f"外部文件五步数码数据前3行:\n{wbsm_data.head(3)}")
                             break
                         except:
                             continue
@@ -453,6 +459,19 @@ def create_color_inventory_app(df):
                 if sim_val != '全部':
                     filtered_data = filtered_data[filtered_data['版本'] == sim_val]
                 
+                # 按日期排序数据，确保图表x轴显示正确的趋势
+                date_columns = ['提取日期', '最近更新时间', 'date', '日期']
+                for date_col in date_columns:
+                    if date_col in filtered_data.columns:
+                        try:
+                            filtered_data[date_col] = pd.to_datetime(filtered_data[date_col], errors='coerce')
+                            filtered_data = filtered_data.sort_values(date_col)
+                            print(f"靓机汇数据已按'{date_col}'列排序，数据行数: {len(filtered_data)}")
+                            break
+                        except Exception as e:
+                            print(f"靓机汇按'{date_col}'排序失败: {e}")
+                            continue
+                
                 return dcc.Graph(figure=create_ljh_analysis_chart(filtered_data))
             
             elif selected_tab == 'wbsm-analysis':
@@ -476,11 +495,32 @@ def create_color_inventory_app(df):
                 filtered_data = wbsm_data.copy()
                 
                 if model_val != '全部':
-                    # 五步数码数据可能使用'型号'或'model'列
-                    if '型号' in filtered_data.columns:
-                        filtered_data = filtered_data[filtered_data['型号'] == model_val]
+                    # 五步数码数据可能使用'models_alone'、'型号'或'model'列
+                    print(f"五步数码型号筛选 - 选择的型号: {model_val}")
+                    print(f"五步数码数据列名: {list(filtered_data.columns)}")
+                    original_count = len(filtered_data)
+                    
+                    if 'models_alone' in filtered_data.columns:
+                        print(f"使用'models_alone'列进行筛选")
+                        print(f"'models_alone'列的唯一值: {filtered_data['models_alone'].unique()[:10]}")
+                        # 使用包含匹配而不是精确匹配
+                        filtered_data = filtered_data[filtered_data['models_alone'].str.contains(model_val, case=False, na=False)]
+                        print(f"筛选后数据行数: {len(filtered_data)} (原始: {original_count})")
+                    elif '型号' in filtered_data.columns:
+                        print(f"使用'型号'列进行筛选")
+                        print(f"'型号'列的唯一值: {filtered_data['型号'].unique()[:10]}")
+                        # 使用包含匹配而不是精确匹配
+                        filtered_data = filtered_data[filtered_data['型号'].str.contains(model_val, case=False, na=False)]
+                        print(f"筛选后数据行数: {len(filtered_data)} (原始: {original_count})")
                     elif 'model' in filtered_data.columns:
-                        filtered_data = filtered_data[filtered_data['model'] == model_val]
+                        print(f"使用'model'列进行筛选")
+                        print(f"'model'列的唯一值: {filtered_data['model'].unique()[:10]}")
+                        # 使用包含匹配而不是精确匹配
+                        filtered_data = filtered_data[filtered_data['model'].str.contains(model_val, case=False, na=False)]
+                        print(f"筛选后数据行数: {len(filtered_data)} (原始: {original_count})")
+                    else:
+                        print(f"警告：五步数码数据中没有找到型号相关列！")
+                        print(f"可用列名: {list(filtered_data.columns)}")
                 
                 if memory_val != '全部':
                     def match_wbsm_memory(mem_val):
@@ -501,6 +541,19 @@ def create_color_inventory_app(df):
                 # 添加缺货状态筛选
                 if wbsm_stock_val != '全部' and '是否缺货' in filtered_data.columns:
                     filtered_data = filtered_data[filtered_data['是否缺货'] == wbsm_stock_val]
+                
+                # 按日期排序数据，确保图表x轴显示正确的趋势
+                date_columns = ['提取日期', '最近更新时间', 'date', '日期']
+                for date_col in date_columns:
+                    if date_col in filtered_data.columns:
+                        try:
+                            filtered_data[date_col] = pd.to_datetime(filtered_data[date_col], errors='coerce')
+                            filtered_data = filtered_data.sort_values(date_col)
+                            print(f"五步数码数据已按'{date_col}'列排序，数据行数: {len(filtered_data)}")
+                            break
+                        except Exception as e:
+                            print(f"按'{date_col}'排序失败: {e}")
+                            continue
                 
                 return dcc.Graph(figure=create_wbsm_analysis_chart(filtered_data))
             
@@ -556,6 +609,19 @@ def create_color_inventory_app(df):
                     # BM数据使用'国家'列作为地区
                     if '国家' in filtered_data.columns:
                         filtered_data = filtered_data[filtered_data['国家'] == local_val]
+                
+                # 按日期排序数据，确保图表x轴显示正确的趋势
+                date_columns = ['提取日期', '最近更新时间', 'date', '日期']
+                for date_col in date_columns:
+                    if date_col in filtered_data.columns:
+                        try:
+                            filtered_data[date_col] = pd.to_datetime(filtered_data[date_col], errors='coerce')
+                            filtered_data = filtered_data.sort_values(date_col)
+                            print(f"讯强数据已按'{date_col}'列排序，数据行数: {len(filtered_data)}")
+                            break
+                        except Exception as e:
+                            print(f"讯强按'{date_col}'排序失败: {e}")
+                            continue
                 
                 return dcc.Graph(figure=create_bm_analysis_chart(filtered_data))
 
@@ -1360,49 +1426,71 @@ def create_bm_analysis_chart(filtered_data):
         unique_colors = sorted(valid_data['颜色中文'].dropna().unique())
         print(f"BM数据中的颜色: {list(unique_colors)}")
         
-        # 为不同颜色使用对应的RGB颜色值
-        color_palette = {
-            '黑色': '#000000',      # 纯黑色
-            '白色': '#F5F5F5',      # 浅灰色（白色在白背景上不可见）
-            '红色': '#DC143C',      # 深红色
-            '蓝色': '#1E90FF',      # 道奇蓝
-            '绿色': '#32CD32',      # 酸橙绿
-            '黄色': '#FFD700',      # 金黄色
-            '紫色': '#9370DB',      # 中紫色
-            '粉色': '#FF69B4',      # 热粉色
-            '灰色': '#808080',      # 标准灰色
-            '银色': '#C0C0C0',      # 银色
-            '金色': '#FFD700',      # 金色
-            '玫瑰金': '#E8B4B8',    # 玫瑰金
-            '深空灰': '#36454F',    # 深空灰
-            '午夜绿': '#004953',    # 午夜绿
-            '紫罗兰': '#8A2BE2',    # 紫罗兰
-            '橙色': '#FF8C00',      # 深橙色
-            '棕色': '#8B4513',      # 马鞍棕
-            '青色': '#00CED1',      # 深绿松石色
-            '深蓝': '#191970',      # 午夜蓝
-            '浅蓝': '#87CEEB',      # 天空蓝
-            '深绿': '#006400',      # 深绿色
-            '浅绿': '#90EE90',      # 浅绿色
-            '深红': '#8B0000',      # 深红色
-            '浅红': '#FFB6C1',      # 浅粉色
-            '深紫': '#4B0082',      # 靛青色
-            '浅紫': '#DDA0DD',      # 梅花色
-            '深灰': '#2F4F4F',      # 深石板灰
-            '浅灰': '#D3D3D3',      # 浅灰色
-            '天蓝': '#87CEEB',      # 天空蓝
-            '海蓝': '#4682B4',      # 钢蓝色
-            '草绿': '#7CFC00',      # 草坪绿
-            '森林绿': '#228B22',    # 森林绿
-            '柠檬黄': '#FFFACD',    # 柠檬绸
-            '橘黄': '#FFA500',      # 橙色
-            '珊瑚红': '#FF7F50',    # 珊瑚色
-            '薄荷绿': '#98FB98',    # 苍绿色
-            '薰衣草': '#E6E6FA',    # 薰衣草色
-            '象牙白': '#FFFFF0',    # 象牙色
-            '米白': '#F5F5DC',      # 米色
-            '奶白': '#FFF8DC',      # 玉米丝色
-        }
+        # 使用统一的颜色映射函数
+        def get_color_for_name(color_name):
+            """根据颜色名称获取对应的十六进制颜色值"""
+            # 首先检查是否在color_to_rgb映射中
+            if color_name in color_to_rgb:
+                rgb = color_to_rgb[color_name]
+                return f'rgb({rgb[0]}, {rgb[1]}, {rgb[2]})'
+            
+            # 如果不在映射中，使用预定义的颜色调色板
+            color_palette = {
+                '黑色': '#000000',      # 纯黑色
+                '白色': '#F5F5F5',      # 浅灰色（白色在白背景上不可见）
+                '红色': '#DC143C',      # 深红色
+                '蓝色': '#1E90FF',      # 道奇蓝
+                '绿色': '#32CD32',      # 酸橙绿
+                '黄色': '#FFD700',      # 金黄色
+                '紫色': '#9370DB',      # 中紫色
+                '粉色': 'rgb(255, 182, 193)',      # 使用标准粉红色
+                '粉红色': 'rgb(255, 182, 193)',    # 使用标准粉红色
+                '灰色': '#808080',      # 标准灰色
+                '银色': '#C0C0C0',      # 银色
+                '金色': '#FFD700',      # 金色
+                '玫瑰金': '#E8B4B8',    # 玫瑰金
+                '玫瑰色': 'rgb(255, 102, 204)',    # 玫瑰色
+                '深空灰': '#36454F',    # 深空灰
+                '太空灰': 'rgb(142, 142, 147)',    # 太空灰
+                '星光色': 'rgb(245, 245, 240)',    # 星光色
+                '深空黑': 'rgb(30, 30, 30)',       # 深空黑
+                '群青蓝': 'rgb(65, 105, 225)',     # 群青蓝
+                '群青色': 'rgb(65, 105, 225)',     # 群青色
+                '蓝绿色': 'rgb(0, 255, 255)',      # 蓝绿色
+                '深青色': 'rgb(0, 255, 255)',      # 深青色
+                '钛金属原色': 'rgb(170, 170, 170)', # 钛金属原色
+                '钛金属沙色': 'rgb(191, 177, 136)', # 钛金属沙色
+                '钛金属白': 'rgb(230, 230, 230)',   # 钛金属白
+                '钛金属黑': 'rgb(68, 68, 68)',     # 钛金属黑
+                '午夜绿': '#004953',    # 午夜绿
+                '紫罗兰': '#8A2BE2',    # 紫罗兰
+                '橙色': '#FF8C00',      # 深橙色
+                '棕色': '#8B4513',      # 马鞍棕
+                '青色': '#00CED1',      # 深绿松石色
+                '深蓝': '#191970',      # 午夜蓝
+                '浅蓝': '#87CEEB',      # 天空蓝
+                '深绿': '#006400',      # 深绿色
+                '浅绿': '#90EE90',      # 浅绿色
+                '深红': '#8B0000',      # 深红色
+                '浅红': '#FFB6C1',      # 浅粉色
+                '深紫': '#4B0082',      # 靛青色
+                '浅紫': '#DDA0DD',      # 梅花色
+                '深灰': '#2F4F4F',      # 深石板灰
+                '浅灰': '#D3D3D3',      # 浅灰色
+                '天蓝': '#87CEEB',      # 天空蓝
+                '海蓝': '#4682B4',      # 钢蓝色
+                '草绿': '#7CFC00',      # 草坪绿
+                '森林绿': '#228B22',    # 森林绿
+                '柠檬黄': '#FFFACD',    # 柠檬绸
+                '橘黄': '#FFA500',      # 橙色
+                '珊瑚红': '#FF7F50',    # 珊瑚色
+                '薄荷绿': '#98FB98',    # 苍绿色
+                '薰衣草': '#E6E6FA',    # 薰衣草色
+                '象牙白': '#FFFFF0',    # 象牙色
+                '米白': '#F5F5DC',      # 米色
+                '奶白': '#FFF8DC',      # 玉米丝色
+            }
+            return color_palette.get(color_name, '#1f77b4')  # 默认蓝色
         
         fallback_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
         
@@ -1412,15 +1500,12 @@ def create_bm_analysis_chart(filtered_data):
             # 按日期分组，计算每日平均价格
             daily_prices = color_data.groupby(color_data[date_column].dt.date)[price_column].mean().reset_index()
             daily_prices[date_column] = pd.to_datetime(daily_prices[date_column])
-            daily_prices = daily_prices.sort_values(date_column)
+            daily_prices = daily_prices.sort_values(date_column).reset_index(drop=True)
             
-            # 格式化日期为月-日
-            date_labels = daily_prices[date_column].dt.strftime('%m-%d')
-            
-            # 选择颜色
-            if color_name in color_palette:
-                line_color = color_palette[color_name]
-            else:
+            # 选择颜色 - 使用统一的颜色映射函数
+            line_color = get_color_for_name(color_name)
+            # 如果返回的是默认颜色，则使用fallback_colors
+            if line_color == '#1f77b4' and color_name not in color_to_rgb:
                 line_color = fallback_colors[i % len(fallback_colors)]
             
             # 为hover信息准备额外数据
@@ -1440,7 +1525,7 @@ def create_bm_analysis_chart(filtered_data):
             
             # 添加趋势线到下方子图
             fig.add_trace(go.Scatter(
-                x=date_labels,
+                x=daily_prices[date_column],
                 y=daily_prices[price_column],
                 mode='lines+markers',
                 name=color_name,
@@ -1449,7 +1534,7 @@ def create_bm_analysis_chart(filtered_data):
                 connectgaps=True,
                 customdata=hover_data,
                 hovertemplate=(
-                    "日期: %{x}<br>"
+                    "日期: %{x|%m-%d}<br>"
                     "颜色: " + color_name + "<br>"
                     "价格: %{y}<br>"
                     "%{customdata}"
@@ -1461,13 +1546,10 @@ def create_bm_analysis_chart(filtered_data):
         # 如果没有颜色列，按整体数据创建趋势线
         daily_prices = valid_data.groupby(valid_data[date_column].dt.date)[price_column].mean().reset_index()
         daily_prices[date_column] = pd.to_datetime(daily_prices[date_column])
-        daily_prices = daily_prices.sort_values(date_column)
-        
-        # 格式化日期为月-日
-        date_labels = daily_prices[date_column].dt.strftime('%m-%d')
+        daily_prices = daily_prices.sort_values(date_column).reset_index(drop=True)
         
         fig.add_trace(go.Scatter(
-            x=date_labels,
+            x=daily_prices[date_column],
             y=daily_prices[price_column],
             mode='lines+markers',
             name='BM数据价格趋势',
@@ -1475,7 +1557,7 @@ def create_bm_analysis_chart(filtered_data):
             marker=dict(size=6),
             connectgaps=True,
             hovertemplate=(
-                "日期: %{x}<br>"
+                "日期: %{x|%m-%d}<br>"
                 "价格: %{y}<br>"
                 "<extra></extra>"
             ),
@@ -1519,7 +1601,10 @@ def create_bm_analysis_chart(filtered_data):
     fig.update_xaxes(
         title_text="日期",
         tickangle=45,
-        type='category',
+        type='date',
+        tickformat='%m-%d',
+        dtick=259200000.0,  # 3天的毫秒数，每3天显示一个日期
+        tickmode='linear',
         row=2, col=1
     )
     fig.update_yaxes(
@@ -1632,7 +1717,8 @@ def create_wbsm_analysis_chart(filtered_data):
             # 按日期分组，计算每日平均价格
             daily_prices = version_data.groupby(version_data[date_column].dt.date)[price_column].mean().reset_index()
             daily_prices[date_column] = pd.to_datetime(daily_prices[date_column])
-            daily_prices = daily_prices.sort_values(date_column)
+            # 确保按日期排序
+            daily_prices = daily_prices.sort_values(date_column).reset_index(drop=True)
             
             # 格式化日期为月-日
             date_labels = daily_prices[date_column].dt.strftime('%m-%d')
@@ -1643,9 +1729,9 @@ def create_wbsm_analysis_chart(filtered_data):
             else:
                 color = fallback_colors[i % len(fallback_colors)]
             
-            # 添加趋势线
+            # 添加趋势线 - 使用实际日期对象确保正确排序
             fig.add_trace(go.Scatter(
-                x=date_labels,
+                x=daily_prices[date_column],  # 使用日期对象而非格式化字符串
                 y=daily_prices[price_column],
                 mode='lines+markers',
                 name=version,
@@ -1653,7 +1739,7 @@ def create_wbsm_analysis_chart(filtered_data):
                 marker=dict(size=6),
                 connectgaps=True,
                 hovertemplate=(
-                    "日期: %{x}<br>"
+                    "日期: %{x|%m-%d}<br>"
                     "版本: " + version + "<br>"
                     "价格: %{y}<br>"
                     "<extra></extra>"
@@ -1663,13 +1749,14 @@ def create_wbsm_analysis_chart(filtered_data):
         # 如果没有memory列，按整体数据创建趋势线
         daily_prices = valid_data.groupby(valid_data[date_column].dt.date)[price_column].mean().reset_index()
         daily_prices[date_column] = pd.to_datetime(daily_prices[date_column])
-        daily_prices = daily_prices.sort_values(date_column)
+        # 确保按日期排序
+        daily_prices = daily_prices.sort_values(date_column).reset_index(drop=True)
         
         # 格式化日期为月-日
         date_labels = daily_prices[date_column].dt.strftime('%m-%d')
         
         fig.add_trace(go.Scatter(
-            x=date_labels,
+            x=daily_prices[date_column],  # 使用日期对象而非格式化字符串
             y=daily_prices[price_column],
             mode='lines+markers',
             name='五步数码价格趋势',
@@ -1677,7 +1764,7 @@ def create_wbsm_analysis_chart(filtered_data):
             marker=dict(size=6),
             connectgaps=True,
             hovertemplate=(
-                "日期: %{x}<br>"
+                "日期: %{x|%m-%d}<br>"
                 "价格: %{y}<br>"
                 "<extra></extra>"
             )
@@ -1693,7 +1780,10 @@ def create_wbsm_analysis_chart(filtered_data):
         xaxis=dict(
             title='日期',
             tickangle=45,
-            type='category'
+            type='date',
+            tickformat='%m-%d',
+            dtick=259200000.0,  # 3天的毫秒数，每3天显示一个日期
+            tickmode='linear'
         ),
         yaxis=dict(
             title=f'{price_column}',
